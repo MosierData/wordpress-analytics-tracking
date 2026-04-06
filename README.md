@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.svg" alt="ROI Insights for WordPress — tag management, tracking pixels, attribution tracking, and call tracking by ROI Insights from MosierData" width="100%" />
+</p>
+
 # ROI Insights for WordPress
 
 **Tag management, tracking pixels, attribution tracking, and call tracking for WordPress — provided by [ROI Insights](https://roiknowledge.com/?utm_source=github&utm_medium=referral&utm_campaign=roi-insights-wp) from [MosierData](https://mosierdata.com/?utm_source=github&utm_medium=referral&utm_campaign=roi-insights-wp).**
@@ -27,6 +31,8 @@ And if your business depends on phone calls, dynamic number insertion connects y
 **That's what this plugin does. And the core of it is free.**
 
 ---
+
+<img src="assets/section-free.svg" alt="What's included for free" width="100%" />
 
 ## What's Included for Free
 
@@ -86,6 +92,8 @@ Every inbound call is logged with caller ID, duration, timestamp, and the attrib
 
 ---
 
+<img src="assets/section-premium.svg" alt="Premium upgrades" width="100%" />
+
 ## Premium Upgrades (Optional)
 
 The free tier stays free forever. Paid tiers add AI-powered intelligence and deeper attribution for businesses that want to know more than just *that* a lead came in — they want to know whether it was any good.
@@ -141,6 +149,8 @@ The jump from Professional to Business saves $35/month in telecom costs alone, p
 
 ---
 
+<img src="assets/section-quickstart.svg" alt="Quick start" width="100%" />
+
 ## Quick Start
 
 ### Step 1 — Install the Plugin
@@ -185,6 +195,8 @@ That's it. Your tracking is live on every page.
 
 ---
 
+<img src="assets/section-howitworks.svg" alt="How it works" width="100%" />
+
 ## How It Works
 
 ROI Insights is a PHP plugin with a React admin UI that communicates with the ROI Insights backend via the WordPress REST API. All the heavy lifting — Google OAuth, license validation, AI analysis — happens on a secure backend at `api.roiknowledge.com`. The only sensitive value stored locally is your license key (in the WordPress options table). Google OAuth tokens are held server-side and never touch your WordPress database.
@@ -202,6 +214,8 @@ Call tracking runs on a prepaid credit system, billed separately from the platfo
 You can enable auto-recharge so your balance stays topped up automatically — no lead is ever lost to a disconnected number because you forgot to buy credits.
 
 ---
+
+<img src="assets/section-faq.svg" alt="Frequently asked questions" width="100%" />
 
 ## FAQ
 
