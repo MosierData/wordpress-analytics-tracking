@@ -1,7 +1,9 @@
 <?php
 /**
- * REST API — registers /wp-json/roi-insights/v1/ endpoints.
- * All admin endpoints require manage_options capability.
+ * Admin AJAX API — registers wp_ajax_roi_insights_* handlers.
+ * Uses admin-ajax.php via jQuery AJAX (Cloudflare-safe XHR transport).
+ *
+ * Backend paths are relative to https://api.roiknowledge.com/api/
  *
  * @package ROI_Insights
  */
@@ -16,8 +18,7 @@ defined( 'ABSPATH' ) || exit;
 
 class ROI_Insights_API {
 
-	const NAMESPACE = 'roi-insights/v1';
-	const BACKEND   = 'https://api.roiknowledge.com';
+	const BACKEND = 'https://api.roiknowledge.com';
 
 	/** @var ROI_Insights_Settings */
 	private $settings;
@@ -30,156 +31,138 @@ class ROI_Insights_API {
 		$this->license  = $license;
 	}
 
-	public function register_routes(): void {
-		// License endpoints.
-		register_rest_route( self::NAMESPACE, '/license/status', array(
-			'methods'             => 'GET',
-			'callback'            => array( $this, 'license_status' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
-		register_rest_route( self::NAMESPACE, '/license/oauth-redirect', array(
-			'methods'             => 'GET',
-			'callback'            => array( $this, 'license_oauth_redirect' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
-		register_rest_route( self::NAMESPACE, '/license/register', array(
-			'methods'             => 'POST',
-			'callback'            => array( $this, 'license_register' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
-		register_rest_route( self::NAMESPACE, '/license/request-magic-link', array(
-			'methods'             => 'POST',
-			'callback'            => array( $this, 'license_request_magic_link' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
-		register_rest_route( self::NAMESPACE, '/license/magic-link-status', array(
-			'methods'             => 'GET',
-			'callback'            => array( $this, 'license_magic_link_status' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
-		register_rest_route( self::NAMESPACE, '/license/validate', array(
-			'methods'             => 'POST',
-			'callback'            => array( $this, 'license_validate' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
+	/**
+	 * Register wp_ajax_* hooks.
+	 * Called directly from the plugin constructor.
+	 */
+	public function register_hooks(): void {
+		$actions = array(
+			'roi_insights_license_status'   => 'handle_license_status',
+			'roi_insights_license_sso'      => 'handle_license_sso',
+			'roi_insights_license_register' => 'handle_license_register',
+			'roi_insights_license_notify'   => 'handle_license_notify',
+			'roi_insights_license_pending'  => 'handle_license_pending',
+			'roi_insights_license_validate' => 'handle_license_validate',
+			'roi_insights_tracking_settings' => 'handle_tracking_get',
+			'roi_insights_tracking_save'    => 'handle_tracking_save',
+			'roi_insights_settings_load'    => 'handle_settings_load',
+			'roi_insights_settings_save'    => 'handle_settings_save',
+			'roi_insights_onboarding_submit' => 'handle_onboarding_submit',
+		);
 
-		// Tracking settings.
-		register_rest_route( self::NAMESPACE, '/tracking/settings', array(
-			'methods'             => 'GET',
-			'callback'            => array( $this, 'tracking_get' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
-		register_rest_route( self::NAMESPACE, '/tracking/save', array(
-			'methods'             => 'POST',
-			'callback'            => array( $this, 'tracking_save' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
-
-		// General settings.
-		register_rest_route( self::NAMESPACE, '/settings/load', array(
-			'methods'             => 'GET',
-			'callback'            => array( $this, 'settings_load' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
-		register_rest_route( self::NAMESPACE, '/settings/save', array(
-			'methods'             => 'POST',
-			'callback'            => array( $this, 'settings_save' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
-
-		// Google OAuth.
-		register_rest_route( self::NAMESPACE, '/google-oauth/initiate', array(
-			'methods'             => 'POST',
-			'callback'            => array( $this, 'google_oauth_initiate' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
-		register_rest_route( self::NAMESPACE, '/google-oauth/status', array(
-			'methods'             => 'GET',
-			'callback'            => array( $this, 'google_oauth_status' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
-		register_rest_route( self::NAMESPACE, '/google-oauth/connected', array(
-			'methods'             => 'POST',
-			'callback'            => array( $this, 'google_oauth_connected' ),
-			'permission_callback' => array( $this, 'require_admin' ),
-		) );
+		foreach ( $actions as $action => $method ) {
+			add_action( 'wp_ajax_' . $action, array( $this, $method ) );
+		}
 	}
 
-	// ─── Permission ─────────────────────────────────────────────────────────────
+	// ─── Auth / Body Helpers ────────────────────────────────────────────────────
 
-	public function require_admin(): bool {
-		return current_user_can( 'manage_options' );
+	private function verify_request(): void {
+		check_ajax_referer( 'roi_insights_nonce', '_wpnonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => 'Forbidden' ), 403 );
+		}
+	}
+
+	/** Decode the JSON-encoded 'data' field sent by api.post(). */
+	private function get_body(): array {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- already verified in verify_request().
+		$raw     = isset( $_REQUEST['data'] ) ? wp_unslash( $_REQUEST['data'] ) : '{}';
+		$decoded = json_decode( $raw, true );
+		return is_array( $decoded ) ? $decoded : array();
 	}
 
 	// ─── License Handlers ───────────────────────────────────────────────────────
 
-	public function license_status(): WP_REST_Response {
-		return new WP_REST_Response( $this->license->get_license_data(), 200 );
+	/** Return cached license data (calls backend to validate if cache is empty). */
+	public function handle_license_status(): void {
+		$this->verify_request();
+		wp_send_json_success( $this->license->get_license_data() );
 	}
 
-	public function license_oauth_redirect( WP_REST_Request $request ): WP_REST_Response {
-		$provider = sanitize_text_field( $request->get_param( 'provider' ) ?? 'google' );
-		$result   = $this->backend_get( '/license/oauth-redirect?provider=' . rawurlencode( $provider ) . '&domain=' . rawurlencode( wp_parse_url( home_url(), PHP_URL_HOST ) ) );
-		return new WP_REST_Response( $result['body'], $result['status'] );
+	/** Return the OAuth popup URL — no backend call needed. */
+	public function handle_license_sso(): void {
+		$this->verify_request();
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$src      = isset( $_REQUEST['src'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['src'] ) ) : 'default';
+		$provider = ( 'default' === $src ) ? 'google' : $src;
+		$domain   = wp_parse_url( home_url(), PHP_URL_HOST );
+		$url      = self::BACKEND . '/api/roi/plugin/auth/' . rawurlencode( $provider ) . '/redirect?domain=' . rawurlencode( $domain );
+		wp_send_json_success( array( 'authUrl' => $url ) );
 	}
 
-	public function license_register( WP_REST_Request $request ): WP_REST_Response {
-		$token  = sanitize_text_field( $request->get_param( 'token' ) ?? '' );
-		$domain = wp_parse_url( home_url(), PHP_URL_HOST );
+	/** Exchange a one-time token (from OAuth or magic link) for a license key. */
+	public function handle_license_register(): void {
+		$this->verify_request();
+		$body   = $this->get_body();
+		$token  = sanitize_text_field( $body['token'] ?? '' );
+		$result = $this->backend_post( '/api/roi/plugin/auth/exchange', array( 'token' => $token ) );
 
-		$result = $this->backend_post( '/license/register', array( 'token' => $token, 'domain' => $domain ) );
-
-		// If backend returned a license key, persist it.
-		if ( 200 === $result['status'] && ! empty( $result['body']['licenseKey'] ) ) {
-			$this->settings->save_license_key( $result['body']['licenseKey'] );
+		// If backend returned a license key, persist it and try to validate.
+		if ( 200 === $result['status'] && ! empty( $result['body']['license_key'] ) ) {
+			$this->settings->save_license_key( $result['body']['license_key'] );
 			$this->license->clear_cache();
-			$result['body']['license'] = $this->license->get_license_data( true );
+			try {
+				$result['body']['license'] = $this->license->get_license_data( true );
+			} catch ( \Throwable $e ) {
+				// Validation may fail if the backend hasn't propagated yet — that's OK.
+				$result['body']['license'] = array( 'isValid' => false, 'reason' => 'not_validated' );
+			}
 		}
 
-		return new WP_REST_Response( $result['body'], $result['status'] );
+		$this->send_backend_result( $result );
 	}
 
-	public function license_request_magic_link( WP_REST_Request $request ): WP_REST_Response {
-		$email  = sanitize_email( $request->get_param( 'email' ) ?? '' );
+	/** Request a magic-link activation email. */
+	public function handle_license_notify(): void {
+		$this->verify_request();
+		$body   = $this->get_body();
+		$email  = sanitize_email( $body['email'] ?? '' );
 		$domain = wp_parse_url( home_url(), PHP_URL_HOST );
-		$result = $this->backend_post( '/license/request-magic-link', array( 'email' => $email, 'domain' => $domain ) );
-		return new WP_REST_Response( $result['body'], $result['status'] );
+		$result = $this->backend_post( '/api/roi/plugin/auth/magic-link', array( 'email' => $email, 'domain' => $domain ) );
+		$this->send_backend_result( $result );
 	}
 
-	public function license_magic_link_status( WP_REST_Request $request ): WP_REST_Response {
-		$poll_token = sanitize_text_field( $request->get_param( 'poll_token' ) ?? '' );
-		$result     = $this->backend_get( '/license/magic-link-status?poll_token=' . rawurlencode( $poll_token ) );
-		return new WP_REST_Response( $result['body'], $result['status'] );
+	/** Poll magic-link verification status. */
+	public function handle_license_pending(): void {
+		$this->verify_request();
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$poll_token = isset( $_REQUEST['poll_token'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['poll_token'] ) ) : '';
+		$result     = $this->backend_get( '/api/roi/plugin/auth/magic-link/status?poll_token=' . rawurlencode( $poll_token ) );
+		$this->send_backend_result( $result );
 	}
 
-	public function license_validate(): WP_REST_Response {
+	/** Force re-validate the stored license key against the backend. */
+	public function handle_license_validate(): void {
+		$this->verify_request();
 		$this->license->clear_cache();
-		$data = $this->license->get_license_data( true );
-		return new WP_REST_Response( $data, 200 );
+		wp_send_json_success( $this->license->get_license_data( true ) );
 	}
 
 	// ─── Tracking Handlers ──────────────────────────────────────────────────────
 
-	public function tracking_get(): WP_REST_Response {
-		return new WP_REST_Response( $this->settings->get_tracking_settings(), 200 );
+	public function handle_tracking_get(): void {
+		$this->verify_request();
+		wp_send_json_success( $this->settings->get_tracking_settings() );
 	}
 
-	public function tracking_save( WP_REST_Request $request ): WP_REST_Response {
-		$body = $request->get_json_params();
-		$this->settings->save_tracking_settings( (array) $body );
-		return new WP_REST_Response( array( 'ok' => true ), 200 );
+	public function handle_tracking_save(): void {
+		$this->verify_request();
+		$this->settings->save_tracking_settings( $this->get_body() );
+		wp_send_json_success( array( 'ok' => true ) );
 	}
 
 	// ─── Settings Handlers ──────────────────────────────────────────────────────
 
-	public function settings_load(): WP_REST_Response {
-		return new WP_REST_Response( $this->settings->get_advanced_settings(), 200 );
+	public function handle_settings_load(): void {
+		$this->verify_request();
+		wp_send_json_success( $this->settings->get_advanced_settings() );
 	}
 
-	public function settings_save( WP_REST_Request $request ): WP_REST_Response {
-		$body = $request->get_json_params();
+	public function handle_settings_save(): void {
+		$this->verify_request();
+		$body = $this->get_body();
 
-		// License key is saved separately.
 		if ( isset( $body['licenseKey'] ) ) {
 			$this->settings->save_license_key( (string) $body['licenseKey'] );
 			$this->license->clear_cache();
@@ -187,30 +170,74 @@ class ROI_Insights_API {
 		}
 
 		if ( ! empty( $body ) ) {
-			$this->settings->save_advanced_settings( (array) $body );
+			$this->settings->save_advanced_settings( $body );
 		}
 
-		return new WP_REST_Response( array( 'ok' => true ), 200 );
+		wp_send_json_success( array( 'ok' => true ) );
 	}
 
-	// ─── Google OAuth Handlers ──────────────────────────────────────────────────
+	// ─── Onboarding Handler ────────────────────────────────────────────────────
 
-	public function google_oauth_initiate(): WP_REST_Response {
-		$domain = wp_parse_url( home_url(), PHP_URL_HOST );
-		$result = $this->backend_post( '/google-oauth/initiate', array( 'domain' => $domain ) );
-		return new WP_REST_Response( $result['body'], $result['status'] );
+	/** Submit onboarding wizard data (business context, objectives, channels, budget). */
+	public function handle_onboarding_submit(): void {
+		$this->verify_request();
+		$body = $this->get_body();
+
+		// Forward each section to the corresponding backend endpoint.
+		// Fail on the first non-2xx response so partial persistence is not reported as success.
+		$steps = array(
+			array(
+				'path' => '/api/portal/onboarding/business-context',
+				'body' => array(
+					'business_type' => sanitize_text_field( $body['business_type'] ?? '' ),
+					'company_size'  => sanitize_text_field( $body['company_size'] ?? '' ),
+				),
+			),
+			array(
+				'path' => '/api/portal/onboarding/objectives',
+				'body' => array(
+					'primary_objectives' => array_map( 'sanitize_text_field', (array) ( $body['primary_objectives'] ?? array() ) ),
+				),
+			),
+			array(
+				'path' => '/api/portal/onboarding/channels',
+				'body' => array(
+					'lead_sources' => array_map( 'sanitize_text_field', (array) ( $body['lead_sources'] ?? array() ) ),
+				),
+			),
+			array(
+				'path' => '/api/portal/onboarding/budget',
+				'body' => array(
+					'marketing_budget' => sanitize_text_field( $body['marketing_budget'] ?? '' ),
+					'budget_scope'     => sanitize_text_field( $body['budget_scope'] ?? '' ),
+				),
+			),
+		);
+
+		foreach ( $steps as $step ) {
+			$result = $this->backend_post( $step['path'], $step['body'] );
+			if ( $result['status'] < 200 || $result['status'] >= 300 ) {
+				$this->send_backend_result( $result );
+				return; // wp_send_json_error exits, but return for clarity.
+			}
+		}
+
+		wp_send_json_success( array( 'ok' => true ) );
 	}
 
-	public function google_oauth_status(): WP_REST_Response {
-		$domain = wp_parse_url( home_url(), PHP_URL_HOST );
-		$result = $this->backend_get( '/google-oauth/status?domain=' . rawurlencode( $domain ) );
-		return new WP_REST_Response( $result['body'], $result['status'] );
-	}
+	// ─── Response Helpers ───────────────────────────────────────────────────────
 
-	public function google_oauth_connected( WP_REST_Request $request ): WP_REST_Response {
-		$domain = wp_parse_url( home_url(), PHP_URL_HOST );
-		$result = $this->backend_post( '/google-oauth/connected', array( 'domain' => $domain ) );
-		return new WP_REST_Response( $result['body'], $result['status'] );
+	/**
+	 * Forward a backend proxy result as wp_send_json_success / _error.
+	 *
+	 * @param array{status:int,body:mixed} $result
+	 */
+	private function send_backend_result( array $result ): void {
+		if ( $result['status'] >= 200 && $result['status'] < 300 ) {
+			wp_send_json_success( $result['body'] );
+		} else {
+			wp_send_json_error( $result['body'], $result['status'] );
+		}
 	}
 
 	// ─── Backend Proxy Helpers ──────────────────────────────────────────────────
@@ -246,7 +273,16 @@ class ROI_Insights_API {
 
 	private function auth_headers(): array {
 		$key = $this->settings->get_license_key();
-		return $key ? array( 'X-License-Key' => $key ) : array();
+		if ( ! $key ) {
+			return array();
+		}
+		// Send the key in all formats the backend may expect.
+		// Plugin endpoints use X-License-Key; portal endpoints use Authorization or X-API-Key.
+		return array(
+			'X-License-Key'  => $key,
+			'X-API-Key'      => $key,
+			'Authorization'  => 'Bearer ' . $key,
+		);
 	}
 
 	/**

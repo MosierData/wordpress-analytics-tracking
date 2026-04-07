@@ -6,9 +6,9 @@ import { SettingsPage } from './Settings';
 type Tab = 'dashboard' | 'tracking' | 'settings';
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'dashboard', label: 'Marketing ROI' },
   { id: 'tracking', label: 'Tracking Pixels' },
-  { id: 'settings', label: 'License & Google' },
+  { id: 'dashboard', label: 'Marketing ROI' },
+  { id: 'settings', label: 'Activation' },
 ];
 
 function getTabFromHash(): Tab {
@@ -31,13 +31,13 @@ export function PluginLayout() {
   }, [] );
 
   return (
-    <div style={ { display: 'flex', flexDirection: 'column', height: '100%' } }>
+    <div style={ { fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif', background: '#f1f5f9', minHeight: 0, paddingBottom: 80 } }>
       <div
         role="tablist"
         style={ {
           display: 'flex',
           borderBottom: '1px solid #e2e8f0',
-          background: '#fff',
+          background: '#ffffff',
           padding: '0 1.25rem',
           gap: '0.25rem',
           flexShrink: 0,
@@ -66,15 +66,15 @@ export function PluginLayout() {
         ) ) }
       </div>
 
-      <div style={ { flex: 1, overflow: 'auto' } }>
-        <div style={ { display: activeTab === 'dashboard' ? 'block' : 'none', height: '100%' } }>
+      <div>
+        <div style={ { display: activeTab === 'dashboard' ? 'block' : 'none' } }>
           <AdminDashboard onNavigateToSettings={ () => handleTabChange( 'settings' ) } />
         </div>
         <div style={ { display: activeTab === 'tracking' ? 'block' : 'none' } }>
           <TrackingSettingsAdmin />
         </div>
         <div style={ { display: activeTab === 'settings' ? 'block' : 'none' } }>
-          <SettingsPage />
+          <SettingsPage onNavigateToDashboard={ () => handleTabChange( 'dashboard' ) } />
         </div>
       </div>
     </div>

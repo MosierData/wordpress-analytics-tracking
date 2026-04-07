@@ -1,4 +1,4 @@
 node_modules/
-build/
+.playwright-cli/
 *.log
 .DS_Store
