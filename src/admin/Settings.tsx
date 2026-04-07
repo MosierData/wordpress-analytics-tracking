@@ -345,7 +345,7 @@ export function SettingsPage( { onNavigateToDashboard }: SettingsPageProps ) {
       };
 
       window.addEventListener( 'message', messageHandler );
-      oauthPollRef.current = setInterval( () => { try { if ( popup.closed ) cleanup(); } catch { cleanup(); } }, 500 );
+      oauthPollRef.current = setInterval( () => { try { if ( popup.closed ) cleanup(); } catch { /* COOP may block — keep listening for postMessage */ } }, 500 );
     } catch {
       setRegisterMessage( 'Error starting sign-in. Please try again.' );
       setRegistering( false );
