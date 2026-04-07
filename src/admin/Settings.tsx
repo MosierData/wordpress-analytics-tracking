@@ -282,6 +282,7 @@ export function SettingsPage( { onNavigateToDashboard }: SettingsPageProps ) {
     setMessage( '' );
     try {
       await api.post( 'settings/save', { licenseKey: licenseKeyInput.trim() } );
+      roiInsights.hasKey = true;
       setMessage( 'License key saved. Click Activate to validate.' );
       setLicenseKeyInput( '' );
     } catch {
