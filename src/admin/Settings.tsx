@@ -207,9 +207,10 @@ function GoogleSignInTroubleshooting() {
 
 interface SettingsPageProps {
   onNavigateToDashboard?: () => void;
+  isActive?: boolean;
 }
 
-export function SettingsPage( { onNavigateToDashboard }: SettingsPageProps ) {
+export function SettingsPage( { onNavigateToDashboard, isActive }: SettingsPageProps ) {
   const [ license, setLicense ] = useState<LicenseData | null>( null );
   const [ activating, setActivating ] = useState( false );
   const [ message, setMessage ] = useState( '' );
@@ -234,6 +235,12 @@ export function SettingsPage( { onNavigateToDashboard }: SettingsPageProps ) {
     const pluginToken = params.get( 'plugin_license_token' );
 
     if ( pluginToken ) {
+      // Remove the token from the URL so it isn't re-processed on refresh.
+      params.delete( 'plugin_license_token' );
+      const cleaned = params.toString();
+      const newUrl = window.location.pathname + ( cleaned ? `?${ cleaned }` : '' ) + window.location.hash;
+      window.history.replaceState( {}, '', newUrl );
+
       void api.post<{ license_key?: string; license?: LicenseData; error?: string }>( 'license/register', { token: pluginToken } )
         .then( result => {
           if ( result.license_key ) {
@@ -261,6 +268,13 @@ export function SettingsPage( { onNavigateToDashboard }: SettingsPageProps ) {
       void api.get<LicenseData>( endpoint ).then( setLicense ).catch( () => {} );
     }
   }, [] );
+
+  // Clear stale success messages when the tab becomes active again.
+  useEffect( () => {
+    if ( isActive && registerMessage.startsWith( 'Account activated' ) ) {
+      setRegisterMessage( '' );
+    }
+  }, [ isActive ] ); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleActivateLicense = useCallback( async () => {
     setActivating( true );

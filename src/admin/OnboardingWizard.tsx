@@ -318,8 +318,14 @@ export function OnboardingWizard( { onComplete, domain }: OnboardingWizardProps 
   // Pre-select channel defaults when entering the channels step
   useEffect( () => {
     if ( step === 3 && businessType && ! channelDefaultsApplied ) {
-      setLeadSources( getDefaultLeadSources( businessType ) );
+      const defaults = getDefaultLeadSources( businessType );
+      setLeadSources( defaults );
       setChannelDefaultsApplied( true );
+      // Auto-expand offline section if any offline channels are in the defaults
+      const offlineIds = new Set( CHANNELS.filter( ch => ch.group === 'offline' ).map( ch => ch.id ) );
+      if ( defaults.some( id => offlineIds.has( id ) ) ) {
+        setShowOffline( true );
+      }
     }
   }, [ step, businessType, channelDefaultsApplied ] );
 

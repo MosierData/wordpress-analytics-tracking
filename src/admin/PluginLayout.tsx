@@ -74,13 +74,13 @@ export function PluginLayout() {
 
       <div>
         <div style={ { display: activeTab === 'dashboard' ? 'block' : 'none' } }>
-          <AdminDashboard onNavigateToSettings={ () => handleTabChange( 'settings' ) } refreshKey={ dashboardRefreshKey } />
+          <AdminDashboard onNavigateToSettings={ () => handleTabChange( 'settings' ) } refreshKey={ dashboardRefreshKey } isActive={ activeTab === 'dashboard' } />
         </div>
         <div style={ { display: activeTab === 'tracking' ? 'block' : 'none' } }>
           <TrackingSettingsAdmin />
         </div>
         <div style={ { display: activeTab === 'settings' ? 'block' : 'none' } }>
-          <SettingsPage onNavigateToDashboard={ handleNavigateToDashboard } />
+          <SettingsPage onNavigateToDashboard={ handleNavigateToDashboard } isActive={ activeTab === 'settings' } />
         </div>
       </div>
     </div>

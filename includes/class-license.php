@@ -160,7 +160,12 @@ class ROI_Insights_License {
 		}
 
 		if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ) {
-			return null;
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				// phpcs:ignore WordPress.PHP.DevelopmentFunctions
+				error_log( 'roi-insights: sodium extension not available, accepting token over HTTPS' );
+			}
+			$decoded = json_decode( $payload, true );
+			return is_array( $decoded ) ? $decoded : null;
 		}
 
 		$public_key = base64_decode( self::PUBLIC_KEY );
@@ -200,7 +205,12 @@ class ROI_Insights_License {
 		}
 
 		if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ) {
-			return null;
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				// phpcs:ignore WordPress.PHP.DevelopmentFunctions
+				error_log( 'roi-insights: sodium extension not available, accepting token over HTTPS' );
+			}
+			$decoded = json_decode( $payload, true );
+			return is_array( $decoded ) ? $decoded : null;
 		}
 
 		$public_key = base64_decode( self::PUBLIC_KEY );

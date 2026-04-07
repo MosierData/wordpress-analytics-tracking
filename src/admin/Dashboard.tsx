@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import type { LicenseData, DashboardStatusDetail } from '../lib/types';
 
@@ -26,6 +26,7 @@ const colors = {
 interface AdminDashboardProps {
   onNavigateToSettings?: () => void;
   refreshKey?: number;
+  isActive?: boolean;
 }
 
 function CheckIcon( { color = colors.success }: { color?: string } ) {
@@ -423,62 +424,91 @@ function ErrorState( { message, onActivate }: { message: string; onActivate?: ()
 
 // ─── Main component ─────────────────────────────────────────────────────────────
 
-export function AdminDashboard( { onNavigateToSettings, refreshKey }: AdminDashboardProps ) {
+export function AdminDashboard( { onNavigateToSettings, refreshKey, isActive }: AdminDashboardProps ) {
   const [ dashboardUrl, setDashboardUrl ] = useState<string | null>( null );
   const [ error, setError ] = useState<string | null>( null );
   const [ notActivated, setNotActivated ] = useState( false );
   const [ dashboardStatus, setDashboardStatus ] = useState<string | null>( null );
   const [ statusDetail, setStatusDetail ] = useState<DashboardStatusDetail | undefined>();
 
+  const fetchStatus = useCallback( async () => {
+    try {
+      const license = await api.get<LicenseData>( 'license/status' );
+
+      if ( ! license.isValid ) {
+        setNotActivated( true );
+        setDashboardUrl( null );
+        setDashboardStatus( null );
+        setError( null );
+        return;
+      }
+
+      setNotActivated( false );
+
+      // Check dashboard readiness status.
+      const status = license.dashboardStatus;
+
+      if ( status === 'email_pending' || status === 'backfilling' ) {
+        setDashboardStatus( status );
+        setStatusDetail( license.dashboardStatusDetail );
+        setDashboardUrl( null );
+        setError( null );
+        return;
+      }
+
+      if ( status === 'error' ) {
+        setError( 'Something went wrong while building your dashboard. We\'ve been notified and are looking into it. Try refreshing in a few minutes.' );
+        setDashboardStatus( null );
+        setDashboardUrl( null );
+        return;
+      }
+
+      if ( license.isFallback ) {
+        setError( 'The dashboard can\'t load right now — we couldn\'t reach the ROI Insights service. Your tracking pixels are still firing normally. Try refreshing in a few minutes.' );
+        setDashboardStatus( null );
+        setDashboardUrl( null );
+        return;
+      }
+
+      if ( ! license.sessionToken ) {
+        // Account is valid but dashboard embed token isn't available yet.
+        // Show the backfilling state rather than a confusing "re-activate" message.
+        setDashboardStatus( 'backfilling' );
+        setDashboardUrl( null );
+        setError( null );
+        return;
+      }
+
+      const url = new URL( DASHBOARD_BASE_URL );
+      url.searchParams.set( 'token', license.sessionToken );
+      url.searchParams.set( 'tier', license.tier ?? 'free' );
+      setDashboardUrl( url.toString() );
+      setDashboardStatus( null );
+      setError( null );
+    } catch {
+      setError( 'Something went wrong loading the dashboard. Refresh the page to try again.' );
+    }
+  }, [] );
+
+  // Re-fetch whenever the tab becomes active or refreshKey changes.
   useEffect( () => {
-    // Reset all state before re-fetching (handles tab re-activation after onboarding).
+    if ( isActive === false ) return;
     setDashboardUrl( null );
     setError( null );
     setNotActivated( false );
     setDashboardStatus( null );
     setStatusDetail( undefined );
+    void fetchStatus();
+  }, [ isActive, refreshKey, fetchStatus ] );
 
-    void ( async () => {
-      try {
-        const license = await api.get<LicenseData>( 'license/status' );
+  // Poll every 30s while in a transient state and the tab is active.
+  useEffect( () => {
+    if ( isActive === false ) return;
+    if ( dashboardStatus !== 'email_pending' && dashboardStatus !== 'backfilling' ) return;
 
-        if ( ! license.isValid ) {
-          setNotActivated( true );
-          return;
-        }
-
-        // Check dashboard readiness status.
-        const status = license.dashboardStatus ?? 'ready';
-
-        if ( status === 'email_pending' || status === 'backfilling' ) {
-          setDashboardStatus( status );
-          setStatusDetail( license.dashboardStatusDetail );
-          return;
-        }
-
-        if ( status === 'error' ) {
-          setError( 'Something went wrong while building your dashboard. We\'ve been notified and are looking into it. Try refreshing in a few minutes.' );
-          return;
-        }
-
-        if ( license.isFallback ) {
-          setError( 'The dashboard can\'t load right now — we couldn\'t reach the ROI Insights service. Your tracking pixels are still firing normally. Try refreshing in a few minutes.' );
-          return;
-        }
-        if ( ! license.sessionToken ) {
-          setError( 'Your session has expired. Head to Activation and re-activate to restore access.' );
-          return;
-        }
-
-        const url = new URL( DASHBOARD_BASE_URL );
-        url.searchParams.set( 'token', license.sessionToken );
-        url.searchParams.set( 'tier', license.tier ?? 'free' );
-        setDashboardUrl( url.toString() );
-      } catch {
-        setError( 'Something went wrong loading the dashboard. Refresh the page to try again.' );
-      }
-    } )();
-  }, [ refreshKey ] );
+    const interval = setInterval( () => void fetchStatus(), 30_000 );
+    return () => clearInterval( interval );
+  }, [ isActive, dashboardStatus, fetchStatus ] );
 
   if ( notActivated ) {
     return <NotActivatedState onActivate={ onNavigateToSettings } />;
