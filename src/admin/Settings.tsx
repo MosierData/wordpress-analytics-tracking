@@ -249,7 +249,11 @@ export function SettingsPage( { onNavigateToDashboard }: SettingsPageProps ) {
             void api.get<LicenseData>( 'license/status' ).then( setLicense ).catch( () => {} );
           }
         } )
-        .catch( () => {} );
+        .catch( () => {
+          // Registration request failed — still load current license state so the page
+          // reflects the actual account status instead of showing a blank activation form.
+          void api.get<LicenseData>( 'license/status' ).then( setLicense ).catch( () => {} );
+        } );
     } else {
       // If a key already exists, force-validate to get fresh status.
       // This handles the case where the key is stored but cached validation expired.

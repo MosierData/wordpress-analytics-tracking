@@ -18,10 +18,16 @@ function getTabFromHash(): Tab {
 
 export function PluginLayout() {
   const [ activeTab, setActiveTab ] = useState<Tab>( getTabFromHash );
+  const [ dashboardRefreshKey, setDashboardRefreshKey ] = useState( 0 );
 
   const handleTabChange = ( tab: Tab ) => {
     setActiveTab( tab );
     window.location.hash = tab === 'dashboard' ? '' : tab;
+  };
+
+  const handleNavigateToDashboard = () => {
+    setDashboardRefreshKey( k => k + 1 );
+    handleTabChange( 'dashboard' );
   };
 
   useEffect( () => {
@@ -68,13 +74,13 @@ export function PluginLayout() {
 
       <div>
         <div style={ { display: activeTab === 'dashboard' ? 'block' : 'none' } }>
-          <AdminDashboard onNavigateToSettings={ () => handleTabChange( 'settings' ) } />
+          <AdminDashboard onNavigateToSettings={ () => handleTabChange( 'settings' ) } refreshKey={ dashboardRefreshKey } />
         </div>
         <div style={ { display: activeTab === 'tracking' ? 'block' : 'none' } }>
           <TrackingSettingsAdmin />
         </div>
         <div style={ { display: activeTab === 'settings' ? 'block' : 'none' } }>
-          <SettingsPage onNavigateToDashboard={ () => handleTabChange( 'dashboard' ) } />
+          <SettingsPage onNavigateToDashboard={ handleNavigateToDashboard } />
         </div>
       </div>
     </div>

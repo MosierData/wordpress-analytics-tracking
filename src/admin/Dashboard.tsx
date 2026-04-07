@@ -25,6 +25,7 @@ const colors = {
 
 interface AdminDashboardProps {
   onNavigateToSettings?: () => void;
+  refreshKey?: number;
 }
 
 function CheckIcon( { color = colors.success }: { color?: string } ) {
@@ -422,7 +423,7 @@ function ErrorState( { message, onActivate }: { message: string; onActivate?: ()
 
 // ─── Main component ─────────────────────────────────────────────────────────────
 
-export function AdminDashboard( { onNavigateToSettings }: AdminDashboardProps ) {
+export function AdminDashboard( { onNavigateToSettings, refreshKey }: AdminDashboardProps ) {
   const [ dashboardUrl, setDashboardUrl ] = useState<string | null>( null );
   const [ error, setError ] = useState<string | null>( null );
   const [ notActivated, setNotActivated ] = useState( false );
@@ -430,6 +431,13 @@ export function AdminDashboard( { onNavigateToSettings }: AdminDashboardProps ) 
   const [ statusDetail, setStatusDetail ] = useState<DashboardStatusDetail | undefined>();
 
   useEffect( () => {
+    // Reset all state before re-fetching (handles tab re-activation after onboarding).
+    setDashboardUrl( null );
+    setError( null );
+    setNotActivated( false );
+    setDashboardStatus( null );
+    setStatusDetail( undefined );
+
     void ( async () => {
       try {
         const license = await api.get<LicenseData>( 'license/status' );
@@ -470,7 +478,7 @@ export function AdminDashboard( { onNavigateToSettings }: AdminDashboardProps ) 
         setError( 'Something went wrong loading the dashboard. Refresh the page to try again.' );
       }
     } )();
-  }, [] );
+  }, [ refreshKey ] );
 
   if ( notActivated ) {
     return <NotActivatedState onActivate={ onNavigateToSettings } />;
