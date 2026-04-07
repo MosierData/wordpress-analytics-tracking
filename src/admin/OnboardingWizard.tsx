@@ -294,27 +294,34 @@ export function OnboardingWizard( { onComplete, domain }: OnboardingWizardProps 
   }, [] );
 
   const businessOptions = useMemo( () => {
+    const legacyIds = new Set( LEGACY_BUSINESS_TYPES.map( b => b.id ) );
     const legacy = LEGACY_BUSINESS_TYPES.map( ( { id, label } ) => ( { value: id, label } ) );
-    const fromGbp = gbpCategories.map( row => ( { value: row.id, label: row.label } ) );
+    const fromGbp = gbpCategories
+      .filter( row => ! legacyIds.has( row.id ) )
+      .map( row => ( { value: row.id, label: row.label } ) );
     return [ ...legacy, ...fromGbp ].sort( ( a, b ) =>
       a.label.localeCompare( b.label, undefined, { sensitivity: 'base' } )
     );
   }, [ gbpCategories ] );
 
   // Reset company size if the category changes (trucks → employees, etc.)
+  // Also reset channel defaults so they recompute for the new industry.
   useEffect( () => {
-    if ( ! businessType || ! companySize ) return;
-    const validIds = getSizeOptionsForBusiness( businessType ).map( s => s.id );
-    if ( ! validIds.includes( companySize ) ) setCompanySize( '' );
-  }, [ businessType, companySize ] );
+    if ( ! businessType ) return;
+    if ( companySize ) {
+      const validIds = getSizeOptionsForBusiness( businessType ).map( s => s.id );
+      if ( ! validIds.includes( companySize ) ) setCompanySize( '' );
+    }
+    setChannelDefaultsApplied( false );
+  }, [ businessType ] ); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-select channel defaults when entering the channels step
   useEffect( () => {
-    if ( step === 3 && businessType && ! channelDefaultsApplied && leadSources.length === 0 ) {
+    if ( step === 3 && businessType && ! channelDefaultsApplied ) {
       setLeadSources( getDefaultLeadSources( businessType ) );
       setChannelDefaultsApplied( true );
     }
-  }, [ step, businessType, channelDefaultsApplied, leadSources.length ] );
+  }, [ step, businessType, channelDefaultsApplied ] );
 
   const sizeOptions = businessType ? getSizeOptionsForBusiness( businessType ) : [];
 
