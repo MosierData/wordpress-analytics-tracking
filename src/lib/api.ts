@@ -46,7 +46,7 @@ function pathToAction( path: string ): { action: string; extras: Record<string, 
   return { action, extras };
 }
 
-function ajax<T>( path: string, data?: unknown ): Promise<T> {
+function ajax<T>( path: string, method: 'GET' | 'POST', data?: unknown ): Promise<T> {
   const { action, extras } = pathToAction( path );
 
   const postData: Record<string, string> = {
@@ -62,7 +62,7 @@ function ajax<T>( path: string, data?: unknown ): Promise<T> {
   return new Promise<T>( ( resolve, reject ) => {
     jQuery.ajax( {
       url:      roiInsights.ajaxUrl,
-      type:     'GET',
+      type:     method,
       data:     postData,
       dataType: 'json',
       success( response: unknown ) {
@@ -81,7 +81,14 @@ function ajax<T>( path: string, data?: unknown ): Promise<T> {
         resolve( response as T );
       },
       error( xhr ) {
-        reject( new Error( `AJAX ${ xhr.status } ${ xhr.statusText } for ${ action } — ${ xhr.responseText.slice( 0, 200 ) }` ) );
+        // Try to parse backend JSON error body for structured messages.
+        let parsed: unknown;
+        try { parsed = JSON.parse( xhr.responseText ); } catch { /* ignore */ }
+        if ( parsed && typeof parsed === 'object' && 'data' in ( parsed as Record<string, unknown> ) ) {
+          reject( ( parsed as { data: unknown } ).data );
+        } else {
+          reject( new Error( `AJAX ${ xhr.status } ${ xhr.statusText } for ${ action }` ) );
+        }
       },
     } );
   } );
@@ -89,9 +96,9 @@ function ajax<T>( path: string, data?: unknown ): Promise<T> {
 
 export const api = {
   get<T>( path: string ): Promise<T> {
-    return ajax<T>( path );
+    return ajax<T>( path, 'GET' );
   },
   post<T>( path: string, data: unknown ): Promise<T> {
-    return ajax<T>( path, data );
+    return ajax<T>( path, 'POST', data );
   },
 };
