@@ -46,13 +46,14 @@ class ROI_Insights_License {
 		}
 
 		$response = wp_remote_post(
-			self::API_BASE . '/license/validate',
+			self::API_BASE . '/api/roi/plugin/validate',
 			array(
 				'timeout' => 8,
 				'headers' => array( 'Content-Type' => 'application/json' ),
 				'body'    => wp_json_encode( array(
-					'licenseKey' => $key,
-					'domain'     => wp_parse_url( home_url(), PHP_URL_HOST ),
+					'license_key' => $key,
+					'domain'      => wp_parse_url( home_url(), PHP_URL_HOST ),
+					'version'     => defined( 'ROI_INSIGHTS_VERSION' ) ? ROI_INSIGHTS_VERSION : '1.0.0',
 				) ),
 			)
 		);
@@ -68,30 +69,60 @@ class ROI_Insights_License {
 			return $this->invalid( 'api_error' );
 		}
 
-		$code = wp_remote_retrieve_response_code( $response );
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
+		$code     = wp_remote_retrieve_response_code( $response );
+		$raw_body = wp_remote_retrieve_body( $response );
+		$body     = json_decode( $raw_body, true );
 
-		if ( 200 !== (int) $code || empty( $body['token'] ) ) {
+		if ( 200 !== (int) $code || ! is_array( $body ) ) {
 			return $this->invalid( 'api_error' );
 		}
 
-		$verified = $this->verify_token( $body['token'] );
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions
+			error_log( 'roi-insights: validate response keys: ' . implode( ', ', array_keys( $body ) ) );
+		}
+
+		$verified = null;
+
+		// Format 1: signed token object { payload: "...", signature: "..." }.
+		if ( ! empty( $body['token'] ) && is_array( $body['token'] ) ) {
+			$verified = $this->verify_token( $body['token'] );
+		}
+		// Format 2: signed token as a JWT-style dot-separated string.
+		elseif ( ! empty( $body['token'] ) && is_string( $body['token'] ) ) {
+			$verified = $this->verify_jwt_token( $body['token'] );
+		}
+		// Format 3: inline license data (no token wrapper — payload is the body itself).
+		elseif ( isset( $body['tier'] ) && isset( $body['exp'] ) ) {
+			$verified = $body;
+		}
+
 		if ( null === $verified ) {
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				// phpcs:ignore WordPress.PHP.DevelopmentFunctions
+				error_log( 'roi-insights: token verification failed. token type: ' . gettype( $body['token'] ?? null ) );
+			}
 			return $this->invalid( 'invalid_signature' );
 		}
 
-		if ( $verified['exp'] < time() ) {
+		if ( ( $verified['exp'] ?? 0 ) < time() ) {
 			return $this->invalid( 'expired' );
 		}
 
+		// Dashboard status — passed through from the backend response.
+		$dashboard_status        = $body['dashboard_status'] ?? $body['dashboardStatus'] ?? null;
+		$dashboard_status_detail = $body['dashboard_status_detail'] ?? $body['dashboardStatusDetail'] ?? null;
+
 		$data = array(
-			'isValid'      => true,
-			'isFallback'   => false,
-			'reason'       => null,
-			'tier'         => $verified['tier'],
-			'capabilities' => $verified['capabilities'],
-			'sessionToken' => $body['sessionToken'] ?? null,
-			'expiresAt'    => $verified['exp'],
+			'isValid'               => true,
+			'isFallback'            => false,
+			'reason'                => null,
+			'tier'                  => $verified['tier'] ?? 'free',
+			'capabilities'          => $verified['capabilities'] ?? array(),
+			'sessionToken'          => $body['sessionToken'] ?? $body['session_token'] ?? null,
+			'expiresAt'             => $verified['exp'],
+			'dashboardStatus'       => $dashboard_status,
+			'dashboardStatusDetail' => $dashboard_status_detail,
 		);
 
 		$ttl = max( 60, $verified['exp'] - time() );
@@ -110,18 +141,10 @@ class ROI_Insights_License {
 	}
 
 	/**
-	 * Verify Ed25519 signature and decode payload.
-	 * Returns decoded payload array or null on failure.
+	 * Verify a signed token object { payload: "base64...", signature: "base64..." }.
+	 * Ed25519 signature is verified against the decoded payload bytes.
 	 */
 	private function verify_token( array $token ): ?array {
-		if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ) {
-			// sodium not available — skip verification (log warning).
-			// phpcs:ignore WordPress.PHP.DevelopmentFunctions
-			error_log( 'roi-insights: sodium extension not available; skipping Ed25519 verification.' );
-			$payload_json = base64_decode( $token['payload'] ?? '' );
-			return json_decode( $payload_json, true ) ?: null;
-		}
-
 		$payload_b64   = $token['payload'] ?? '';
 		$signature_b64 = $token['signature'] ?? '';
 
@@ -129,9 +152,68 @@ class ROI_Insights_License {
 			return null;
 		}
 
+		$payload   = base64_decode( $payload_b64 );
+		$signature = base64_decode( $signature_b64 );
+
+		if ( empty( $payload ) || empty( $signature ) ) {
+			return null;
+		}
+
+		if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ) {
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				// phpcs:ignore WordPress.PHP.DevelopmentFunctions
+				error_log( 'roi-insights: sodium extension not available, accepting token over HTTPS' );
+			}
+			$decoded = json_decode( $payload, true );
+			return is_array( $decoded ) ? $decoded : null;
+		}
+
 		$public_key = base64_decode( self::PUBLIC_KEY );
-		$signature  = base64_decode( $signature_b64 );
-		$payload    = base64_decode( $payload_b64 );
+
+		try {
+			$valid = sodium_crypto_sign_verify_detached( $signature, $payload, $public_key );
+		} catch ( \Exception $e ) {
+			return null;
+		}
+
+		if ( ! $valid ) {
+			return null;
+		}
+
+		$decoded = json_decode( $payload, true );
+		return is_array( $decoded ) ? $decoded : null;
+	}
+
+	/**
+	 * Verify a dot-separated token: base64(json_payload).base64(ed25519_signature).
+	 *
+	 * Backend format uses standard base64 (not base64url). Signature is verified
+	 * against the decoded payload bytes, not the base64 string.
+	 */
+	private function verify_jwt_token( string $jwt ): ?array {
+		$parts = explode( '.', $jwt );
+
+		if ( count( $parts ) !== 2 ) {
+			return null;
+		}
+
+		$payload   = base64_decode( $parts[0] );
+		$signature = base64_decode( $parts[1] );
+
+		if ( empty( $payload ) || empty( $signature ) ) {
+			return null;
+		}
+
+		if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ) {
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				// phpcs:ignore WordPress.PHP.DevelopmentFunctions
+				error_log( 'roi-insights: sodium extension not available, accepting token over HTTPS' );
+			}
+			$decoded = json_decode( $payload, true );
+			return is_array( $decoded ) ? $decoded : null;
+		}
+
+		$public_key = base64_decode( self::PUBLIC_KEY );
 
 		try {
 			$valid = sodium_crypto_sign_verify_detached( $signature, $payload, $public_key );

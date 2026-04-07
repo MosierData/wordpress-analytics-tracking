@@ -8,6 +8,14 @@ export type LicenseCapability =
   | 'google_analytics'
   | 'search_console';
 
+export type DashboardStatus = 'email_pending' | 'backfilling' | 'ready' | 'error';
+
+export interface DashboardStatusDetail {
+  started_at?: string;
+  estimated_ready_at?: string;
+  progress_pct?: number;
+}
+
 export interface LicenseData {
   isValid: boolean;
   isFallback?: boolean;
@@ -16,15 +24,27 @@ export interface LicenseData {
   capabilities: LicenseCapability[];
   sessionToken?: string;
   expiresAt?: number;
+  dashboardStatus?: DashboardStatus;
+  dashboardStatusDetail?: DashboardStatusDetail;
+}
+
+export interface OnboardingData {
+  business_type: string;
+  company_size: string;
+  primary_objectives: string[];
+  lead_sources: string[];
+  marketing_budget: string;
+  budget_scope: string;
 }
 
 /** Injected by PHP via wp_localize_script as window.roiInsights */
 export interface RoiInsightsGlobal {
   nonce: string;
-  apiBase: string;
+  ajaxUrl: string;
   tier: LicenseTier;
   capabilities: LicenseCapability[];
   isValid: boolean;
+  hasKey: boolean;
 }
 
 declare global {
