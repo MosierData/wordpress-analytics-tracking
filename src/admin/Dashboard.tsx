@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import type { LicenseData, DashboardStatusDetail } from '../lib/types';
+import type { LicenseData, DashboardStatus, DashboardStatusDetail } from '../lib/types';
 
 const DASHBOARD_BASE_URL = 'https://my.roiknowledge.com/embed/dashboard';
 
@@ -428,7 +428,7 @@ export function AdminDashboard( { onNavigateToSettings, refreshKey, isActive }: 
   const [ dashboardUrl, setDashboardUrl ] = useState<string | null>( null );
   const [ error, setError ] = useState<string | null>( null );
   const [ notActivated, setNotActivated ] = useState( false );
-  const [ dashboardStatus, setDashboardStatus ] = useState<string | null>( null );
+  const [ dashboardStatus, setDashboardStatus ] = useState<DashboardStatus | null>( null );
   const [ statusDetail, setStatusDetail ] = useState<DashboardStatusDetail | undefined>();
 
   const loadLicense = useCallback( async ( endpoint: 'license/validate' | 'license/status' ) => {

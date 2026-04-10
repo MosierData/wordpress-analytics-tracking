@@ -47,7 +47,12 @@ class ROI_Insights_API {
 			'roi_insights_tracking_save'    => 'handle_tracking_save',
 			'roi_insights_settings_load'    => 'handle_settings_load',
 			'roi_insights_settings_save'    => 'handle_settings_save',
-			'roi_insights_onboarding_submit' => 'handle_onboarding_submit',
+			'roi_insights_onboarding_submit'   => 'handle_onboarding_submit',
+			'roi_insights_onboarding_complete' => 'handle_onboarding_complete',
+			'roi_insights_onboarding_scan'     => 'handle_onboarding_scan',
+			'roi_insights_onboarding_state'    => 'handle_onboarding_state',
+			'roi_insights_integrations_get'        => 'handle_integrations_get',
+			'roi_insights_integrations_disconnect' => 'handle_integrations_disconnect',
 		);
 
 		foreach ( $actions as $action => $method ) {
@@ -67,7 +72,7 @@ class ROI_Insights_API {
 	/** Decode the JSON-encoded 'data' field sent by api.post(). */
 	private function get_body(): array {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- already verified in verify_request().
-		$raw     = isset( $_REQUEST['data'] ) ? wp_unslash( $_REQUEST['data'] ) : '{}';
+		$raw     = isset( $_POST['data'] ) ? wp_unslash( $_POST['data'] ) : '{}';
 		$decoded = json_decode( $raw, true );
 		return is_array( $decoded ) ? $decoded : array();
 	}
@@ -83,8 +88,8 @@ class ROI_Insights_API {
 	/** Return the OAuth popup URL — no backend call needed. */
 	public function handle_license_sso(): void {
 		$this->verify_request();
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$src      = isset( $_REQUEST['src'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['src'] ) ) : 'default';
+		$body     = $this->get_body();
+		$src      = sanitize_text_field( $body['src'] ?? 'default' );
 		$provider = ( 'default' === $src ) ? 'google' : $src;
 		$domain   = wp_parse_url( home_url(), PHP_URL_HOST );
 		$url      = self::BACKEND . '/api/roi/plugin/auth/' . rawurlencode( $provider ) . '/redirect?domain=' . rawurlencode( $domain );
@@ -123,11 +128,16 @@ class ROI_Insights_API {
 		$this->send_backend_result( $result );
 	}
 
-	/** Poll magic-link verification status. */
+	/**
+	 * Poll magic-link verification status.
+	 * The poll_token arrives via POST body (not URL) from the frontend to avoid
+	 * browser history / CDN log exposure. The server-to-server call to the backend
+	 * uses a query param since that's the endpoint's contract.
+	 */
 	public function handle_license_pending(): void {
 		$this->verify_request();
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$poll_token = isset( $_REQUEST['poll_token'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['poll_token'] ) ) : '';
+		$body       = $this->get_body();
+		$poll_token = sanitize_text_field( $body['poll_token'] ?? '' );
 		$result     = $this->backend_get( '/api/roi/plugin/auth/magic-link/status?poll_token=' . rawurlencode( $poll_token ) );
 		$this->send_backend_result( $result );
 	}
@@ -136,7 +146,13 @@ class ROI_Insights_API {
 	public function handle_license_validate(): void {
 		$this->verify_request();
 		$this->license->clear_cache();
-		wp_send_json_success( $this->license->get_license_data( true ) );
+		try {
+			wp_send_json_success( $this->license->get_license_data( true ) );
+		} catch ( \Throwable $e ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions
+			error_log( 'roi-insights: license validation failed: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() );
+			wp_send_json_error( array( 'error' => 'Validation failed: ' . $e->getMessage() ), 503 );
+		}
 	}
 
 	// ─── Tracking Handlers ──────────────────────────────────────────────────────
@@ -176,9 +192,15 @@ class ROI_Insights_API {
 		wp_send_json_success( array( 'ok' => true ) );
 	}
 
-	// ─── Onboarding Handler ────────────────────────────────────────────────────
+	// ─── Onboarding Handlers ───────────────────────────────────────────────────
 
-	/** Submit onboarding wizard data (business context, objectives, channels, budget). */
+	/**
+	 * Submit onboarding wizard data (business context, objectives, channels, budget)
+	 * and signal completion to trigger the dashboard backfill.
+	 *
+	 * Portal endpoints require the sessionToken (looker_api_key), not the plugin
+	 * license key. See portal_auth_headers().
+	 */
 	public function handle_onboarding_submit(): void {
 		$this->verify_request();
 		$body = $this->get_body();
@@ -214,15 +236,101 @@ class ROI_Insights_API {
 			),
 		);
 
-		foreach ( $steps as $step ) {
-			$result = $this->backend_post( $step['path'], $step['body'] );
+		foreach ( $steps as $idx => $step ) {
+			$result = $this->backend_portal_post( $step['path'], $step['body'] );
 			if ( $result['status'] < 200 || $result['status'] >= 300 ) {
+				$result['body']['failed_step'] = basename( $step['path'] );
+				$result['body']['failed_step_index'] = $idx;
 				$this->send_backend_result( $result );
-				return; // wp_send_json_error exits, but return for clarity.
+				return;
 			}
 		}
 
+		// Step 5: Signal onboarding completion — triggers the dashboard backfill.
+		// The /complete endpoint is idempotent on the backend (sets state to
+		// ONBOARDING_COMPLETE; duplicate calls are no-ops).
+		$complete = $this->backend_portal_post( '/api/portal/onboarding/complete', new \stdClass() );
+		if ( $complete['status'] < 200 || $complete['status'] >= 300 ) {
+			$complete['body']['failed_step'] = 'complete';
+			$complete['body']['failed_step_index'] = count( $steps );
+			$this->send_backend_result( $complete );
+			return;
+		}
+
 		wp_send_json_success( array( 'ok' => true ) );
+	}
+
+	/** Trigger a website scan for onboarding Step 1. */
+	public function handle_onboarding_scan(): void {
+		$this->verify_request();
+
+		// Rate limit: 1 scan per minute per user.
+		$throttle_key = 'roi_scan_' . get_current_blog_id() . '_' . get_current_user_id();
+		if ( get_transient( $throttle_key ) ) {
+			wp_send_json_error( array( 'message' => 'Please wait before scanning again.' ), 429 );
+		}
+		set_transient( $throttle_key, 1, 60 );
+
+		$body = $this->get_body();
+		$url  = esc_url_raw( $body['url'] ?? '' );
+
+		// SSRF guard: only allow scanning the site's own domain over HTTPS.
+		// Normalize IDN/punycode to ASCII for consistent comparison, and reject
+		// URLs containing userinfo (user:pass@host) which could bypass host checks.
+		$parsed = wp_parse_url( $url );
+		if ( ! is_array( $parsed ) ) {
+			wp_send_json_error( array( 'message' => 'Invalid scan URL.' ), 400 );
+		}
+		if ( ! empty( $parsed['user'] ) || ! empty( $parsed['pass'] ) ) {
+			wp_send_json_error( array( 'message' => 'Invalid scan URL.' ), 400 );
+		}
+
+		$scan_scheme = $parsed['scheme'] ?? '';
+		$scan_host   = strtolower( $parsed['host'] ?? '' );
+		$site_host   = strtolower( wp_parse_url( home_url(), PHP_URL_HOST ) );
+
+		// Normalize IDN domains to ASCII (punycode) for safe comparison.
+		if ( function_exists( 'idn_to_ascii' ) ) {
+			$scan_host = idn_to_ascii( $scan_host, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 ) ?: $scan_host;
+			$site_host = idn_to_ascii( $site_host, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 ) ?: $site_host;
+		}
+
+		if ( 'https' !== $scan_scheme || $scan_host !== $site_host ) {
+			wp_send_json_error( array( 'message' => 'Scan URL must match the site domain over HTTPS.' ), 400 );
+		}
+
+		$result = $this->backend_portal_post( '/api/portal/onboarding/website-scan', array( 'url' => $url ) );
+		$this->send_backend_result( $result );
+	}
+
+	/** Poll onboarding state (includes scan status/results). */
+	public function handle_onboarding_state(): void {
+		$this->verify_request();
+		$result = $this->backend_portal_get( '/api/portal/onboarding/state' );
+		$this->send_backend_result( $result );
+	}
+
+	/** Standalone completion endpoint — allows retry if the /complete call fails independently. */
+	public function handle_onboarding_complete(): void {
+		$this->verify_request();
+		$result = $this->backend_portal_post( '/api/portal/onboarding/complete', new \stdClass() );
+		$this->send_backend_result( $result );
+	}
+
+	// ─── Integrations Handlers ─────────────────────────────────────────────────
+
+	/** Fetch connected service statuses for the Activation tab. */
+	public function handle_integrations_get(): void {
+		$this->verify_request();
+		$result = $this->backend_portal_get( '/api/portal/integrations' );
+		$this->send_backend_result( $result );
+	}
+
+	/** Disconnect the Google account (keeps license key valid). */
+	public function handle_integrations_disconnect(): void {
+		$this->verify_request();
+		$result = $this->backend_portal_delete( '/api/portal/integrations/google' );
+		$this->send_backend_result( $result );
 	}
 
 	// ─── Response Helpers ───────────────────────────────────────────────────────
@@ -271,18 +379,91 @@ class ROI_Insights_API {
 		return $this->parse_response( $response );
 	}
 
+	/**
+	 * Auth headers for plugin-specific endpoints (/api/roi/plugin/*).
+	 * Uses the qdsh_… license key stored in wp_options.
+	 *
+	 * Only sends X-License-Key — the single header plugin endpoints expect.
+	 * Portal endpoints use portal_auth_headers() with a Bearer token instead.
+	 */
 	private function auth_headers(): array {
 		$key = $this->settings->get_license_key();
 		if ( ! $key ) {
 			return array();
 		}
-		// Send the key in all formats the backend may expect.
-		// Plugin endpoints use X-License-Key; portal endpoints use Authorization or X-API-Key.
 		return array(
-			'X-License-Key'  => $key,
-			'X-API-Key'      => $key,
-			'Authorization'  => 'Bearer ' . $key,
+			'Accept'        => 'application/json',
+			'X-License-Key' => $key,
 		);
+	}
+
+	/**
+	 * Auth headers for portal endpoints (/api/portal/*).
+	 *
+	 * Portal endpoints authenticate via the looker_api_key (sessionToken),
+	 * NOT the qdsh_… plugin license key. The sessionToken is returned by the
+	 * /api/roi/plugin/validate endpoint and cached in the license transient.
+	 */
+	private function portal_auth_headers(): array {
+		$data  = $this->license->get_license_data();
+		$token = $data['sessionToken'] ?? '';
+		if ( empty( $token ) ) {
+			// No sessionToken available — return Accept only so the request fails
+			// with a clear 401 rather than sending a mismatched X-License-Key
+			// that portal endpoints won't recognize.
+			return array( 'Accept' => 'application/json' );
+		}
+		return array(
+			'Accept'        => 'application/json',
+			'Authorization' => 'Bearer ' . $token,
+		);
+	}
+
+	// ─── Portal Backend Proxy Helpers ───────────────────────────────────────────
+
+	/**
+	 * @return array{status:int,body:mixed}
+	 */
+	private function backend_portal_get( string $path ): array {
+		$response = wp_remote_get(
+			self::BACKEND . $path,
+			array(
+				'timeout' => 10,
+				'headers' => $this->portal_auth_headers(),
+			)
+		);
+		return $this->parse_response( $response );
+	}
+
+	/**
+	 * @param object|array $body  Use stdClass for empty {} payloads.
+	 * @return array{status:int,body:mixed}
+	 */
+	private function backend_portal_post( string $path, $body ): array {
+		$response = wp_remote_post(
+			self::BACKEND . $path,
+			array(
+				'timeout' => 10,
+				'headers' => array_merge( $this->portal_auth_headers(), array( 'Content-Type' => 'application/json' ) ),
+				'body'    => wp_json_encode( $body ),
+			)
+		);
+		return $this->parse_response( $response );
+	}
+
+	/**
+	 * @return array{status:int,body:mixed}
+	 */
+	private function backend_portal_delete( string $path ): array {
+		$response = wp_remote_request(
+			self::BACKEND . $path,
+			array(
+				'method'  => 'DELETE',
+				'timeout' => 10,
+				'headers' => $this->portal_auth_headers(),
+			)
+		);
+		return $this->parse_response( $response );
 	}
 
 	/**
