@@ -92,10 +92,8 @@ class ROI_Insights_License {
 		elseif ( ! empty( $body['token'] ) && is_string( $body['token'] ) ) {
 			$verified = $this->verify_jwt_token( $body['token'] );
 		}
-		// Format 3: inline license data (no token wrapper — payload is the body itself).
-		elseif ( isset( $body['tier'] ) && isset( $body['exp'] ) ) {
-			$verified = $body;
-		}
+		// Format 3 removed — inline data without a signature is not trustworthy.
+		// If the backend needs to send unsigned data, it should be wrapped in a signed token.
 
 		if ( null === $verified ) {
 			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
@@ -125,7 +123,10 @@ class ROI_Insights_License {
 			'dashboardStatusDetail' => $dashboard_status_detail,
 		);
 
-		$ttl = max( 60, $verified['exp'] - time() );
+		// Cap TTL at 15 minutes so session tokens are refreshed before they expire
+		// on the remote dashboard service. The license itself may be valid for months,
+		// but the embedded session token is typically short-lived.
+		$ttl = min( 15 * MINUTE_IN_SECONDS, max( 60, $verified['exp'] - time() ) );
 		set_transient( self::CACHE_KEY, $data, $ttl );
 		set_transient( self::CACHE_KEY . '_stale', $data, DAY_IN_SECONDS * 7 );
 
@@ -162,10 +163,9 @@ class ROI_Insights_License {
 		if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ) {
 			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
 				// phpcs:ignore WordPress.PHP.DevelopmentFunctions
-				error_log( 'roi-insights: sodium extension not available, accepting token over HTTPS' );
+				error_log( 'roi-insights: sodium extension not available — cannot verify signature' );
 			}
-			$decoded = json_decode( $payload, true );
-			return is_array( $decoded ) ? $decoded : null;
+			return null;
 		}
 
 		$public_key = base64_decode( self::PUBLIC_KEY );
@@ -207,10 +207,9 @@ class ROI_Insights_License {
 		if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ) {
 			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
 				// phpcs:ignore WordPress.PHP.DevelopmentFunctions
-				error_log( 'roi-insights: sodium extension not available, accepting token over HTTPS' );
+				error_log( 'roi-insights: sodium extension not available — cannot verify signature' );
 			}
-			$decoded = json_decode( $payload, true );
-			return is_array( $decoded ) ? $decoded : null;
+			return null;
 		}
 
 		$public_key = base64_decode( self::PUBLIC_KEY );
