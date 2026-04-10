@@ -88,7 +88,7 @@ class ROI_Insights_Tracking {
 		if ( $s['ga4Enabled'] && ! empty( $s['ga4Id'] ) ) {
 			$ga4_id = esc_js( $s['ga4Id'] );
 			echo "<!-- ROI Insights: Google Analytics 4 -->\n";
-			echo "<script async src=\"https://www.googletagmanager.com/gtag/js?id=" . esc_attr( $s['ga4Id'] ) . "\"></script>\n"; // phpcs:ignore WordPress.Security.EscapeOutput
+			wp_enqueue_script( 'roi-insights-ga4-gtag', 'https://www.googletagmanager.com/gtag/js?id=' . rawurlencode( $s['ga4Id'] ), array(), null, false ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
 			echo "<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','" . $ga4_id . "');</script>\n"; // phpcs:ignore WordPress.Security.EscapeOutput
 		}
 
@@ -110,10 +110,7 @@ class ROI_Insights_Tracking {
 		if ( $s['tiktokEnabled'] && ! empty( $s['tiktokId'] ) ) {
 			$tt_id = esc_js( $s['tiktokId'] );
 			echo "<!-- ROI Insights: TikTok Pixel -->\n";
-			echo "
-<script>
-!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=['page','track','identify','instances','debug','on','off','once','ready','alias','group','enableCookie','disableCookie'],ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){for(var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e},ttq.load=function(e,n){var i='https://analytics.tiktok.com/i18n/pixel/events.js';ttq._i=ttq._i||{},ttq._i[e]=[],ttq._i[e]._u=i,ttq._t=ttq._t||{},ttq._t[e]=+new Date,ttq._o=ttq._o||{},ttq._o[e]=n||{};var o=document.createElement('script');o.type='text/javascript',o.async=!0,o.src=i+'?sdkid='+e+'&lib='+t;var a=document.getElementsByTagName('script')[0];a.parentNode.insertBefore(o,a)};ttq.load('" . $tt_id . "');ttq.page();}(window,document,'ttq');
-</script>\n"; // phpcs:ignore WordPress.Security.EscapeOutput
+			echo "<script>!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=['page','track','identify','instances','debug','on','off','once','ready','alias','group','enableCookie','disableCookie'],ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){for(var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e},ttq.load=function(e,n){var i='https://analytics.tiktok.com/i18n/pixel/events.js';ttq._i=ttq._i||{},ttq._i[e]=[],ttq._i[e]._u=i,ttq._t=ttq._t||{},ttq._t[e]=+new Date,ttq._o=ttq._o||{},ttq._o[e]=n||{};var o=document.createElement('script');o.type='text/javascript',o.async=!0,o.src=i+'?sdkid='+e+'&lib='+t;var a=document.getElementsByTagName('script')[0];a.parentNode.insertBefore(o,a)};ttq.load('" . $tt_id . "');ttq.page();}(window,document,'ttq');</script>\n"; // phpcs:ignore WordPress.Security.EscapeOutput
 		}
 
 		// Microsoft (Bing) UET Tag.
@@ -127,22 +124,14 @@ class ROI_Insights_Tracking {
 		if ( $s['pinterestEnabled'] && ! empty( $s['pinterestId'] ) ) {
 			$pt_id = esc_js( $s['pinterestId'] );
 			echo "<!-- ROI Insights: Pinterest Tag -->\n";
-			echo "
-<script>
-!function(e){if(!window.pintrk){window.pintrk=function(){window.pintrk.queue.push(Array.prototype.slice.call(arguments))};var n=window.pintrk;n.queue=[],n.version='3.0';var t=document.createElement('script');t.async=!0,t.src=e;var r=document.getElementsByTagName('script')[0];r.parentNode.insertBefore(t,r)}}('https://s.pinimg.com/ct/core.js');
-pintrk('load','" . $pt_id . "');pintrk('page');
-</script>\n"; // phpcs:ignore WordPress.Security.EscapeOutput
+			echo "<script>!function(e){if(!window.pintrk){window.pintrk=function(){window.pintrk.queue.push(Array.prototype.slice.call(arguments))};var n=window.pintrk;n.queue=[],n.version='3.0';var t=document.createElement('script');t.async=!0,t.src=e;var r=document.getElementsByTagName('script')[0];r.parentNode.insertBefore(t,r)}}('https://s.pinimg.com/ct/core.js');pintrk('load','" . $pt_id . "');pintrk('page');</script>\n"; // phpcs:ignore WordPress.Security.EscapeOutput
 		}
 
 		// Nextdoor Pixel.
 		if ( $s['nextdoorEnabled'] && ! empty( $s['nextdoorId'] ) ) {
 			$nd_id = esc_js( $s['nextdoorId'] );
 			echo "<!-- ROI Insights: Nextdoor Pixel -->\n";
-			echo "
-<script>
-(function(w,d,s,n,a){if(!w[n]){w[n]={},w[n].q=[];var t=d.createElement(s);t.async=!0,t.src='https://ads.nextdoor.com/public/pixel/ndp.js';var e=d.getElementsByTagName(s)[0];e.parentNode.insertBefore(t,e),w[n].track=function(p,o){w[n].q.push({p:p,o:o})}}w[n].track('PAGE_VIEW',{advertiser_id:'" . $nd_id . "'});
-})(window,document,'script','ndp');
-</script>\n"; // phpcs:ignore WordPress.Security.EscapeOutput
+			echo "<script>(function(w,d,s,n,a){if(!w[n]){w[n]={},w[n].q=[];var t=d.createElement(s);t.async=!0,t.src='https://ads.nextdoor.com/public/pixel/ndp.js';var e=d.getElementsByTagName(s)[0];e.parentNode.insertBefore(t,e),w[n].track=function(p,o){w[n].q.push({p:p,o:o})}}w[n].track('PAGE_VIEW',{advertiser_id:'" . $nd_id . "'});})(window,document,'script','ndp');</script>\n"; // phpcs:ignore WordPress.Security.EscapeOutput
 		}
 
 		// Custom head code.

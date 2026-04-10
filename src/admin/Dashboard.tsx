@@ -542,6 +542,12 @@ export function AdminDashboard( { onNavigateToSettings, refreshKey, isActive }: 
     );
   }
 
+  // The dashboard is embedded via iframe because it renders complex interactive
+  // charts (Looker/GA4 data, call tracking, attribution funnels) that are built
+  // and maintained on the my.roiknowledge.com service. Rebuilding this UI natively
+  // in the WP admin React shell is not feasible given the data pipeline complexity.
+  // The iframe is sandboxed and authenticated with a short-lived session token —
+  // it only loads when the user navigates to this tab (isActive gate above).
   return (
     <div style={ { width: '100%' } }>
       <iframe

@@ -109,19 +109,18 @@ The free tier stays free forever. Paid tiers add AI-powered intelligence and dee
 | Header/footer scripts | ✅ | ✅ | ✅ |
 | Call tracking (DNI) | ✅ | ✅ | ✅ |
 | Basic call log | ✅ | ✅ | ✅ |
-| Call tracking rate (per number/month) | $15.00 | $9.00 | $6.00 |
-| Call tracking rate (per minute) | $0.25 | $0.15 | $0.10 |
+| Call tracking rate (per number/month) | $8.00 | $6.00 | $4.00 |
+| Call tracking rate (per minute) | $0.20 | $0.15 | $0.10 |
 | AI weekly executive summary | — | ✅ | ✅ |
-| Call audio recording | — | ✅ | ✅ |
+| Call audio recording | — | ✅ (2 credits/min) | ✅ (1 credit/min) |
 | AI call transcription & scoring | — | ✅ | ✅ |
 | Advanced UTM attribution | — | ✅ | ✅ |
-| Ads Advisor (24/7 spend watchdog) | — | — | ✅ |
 | Custom reporting | — | — | ✅ |
 | MCP AI agent access | — | — | ✅ |
 
 **Professional ($39.95/mo)** is built for businesses running paid ads. You get a weekly AI executive summary that tells you what's working, full call transcription and lead scoring, and lower call tracking rates. For a lot of businesses, the savings on call tracking alone covers the subscription — see the math below.
 
-**Business ($199/mo)** is for high-volume advertisers and agencies. The Ads Advisor watches your Google Ads spend around the clock — alerting you to budget overruns, underperforming campaigns, and automated bidding changes that are quietly costing you money. You also get the lowest call tracking rates, custom reporting, and MCP AI agent access to query your marketing data programmatically.
+**Business ($199/mo)** is for high-volume advertisers and agencies. You get the lowest call tracking rates, custom reporting, and MCP AI agent access to query your marketing data programmatically.
 
 **Founder's Club ($4,495 one-time)** — Lifetime access to Business tier features, available as a limited-time offer for early adopters. See [ROI Insights](https://roiknowledge.com/?utm_source=github&utm_medium=referral&utm_campaign=roi-insights-wp) for availability.
 
@@ -133,19 +132,19 @@ It can — and often does. Because call tracking rates drop with higher tiers, t
 
 | | Platform | Number | Minutes | Monthly Total |
 |--|:--------:|:------:|:-------:|:-------------:|
-| Free | $0 | $15.00 | $90.00 | **$105.00** |
-| Professional | $39.95 | $9.00 | $54.00 | **$102.95** |
+| Free | $0 | $8.00 | $72.00 | **$80.00** |
+| Professional | $39.95 | $6.00 | $54.00 | **$99.95** |
 
-At 120 calls a month, Professional is cheaper than Free — and includes AI transcription, lead scoring, and weekly reports.
+At higher call volumes, the savings on per-minute rates start to offset the subscription — and you get AI transcription, lead scoring, and weekly reports.
 
 **Agency running 15 numbers, 3,000 minutes/month:**
 
 | | Platform | Numbers | Minutes | Monthly Total |
 |--|:--------:|:-------:|:-------:|:-------------:|
-| Professional | $39.95 | $135.00 | $450.00 | **$624.95** |
-| Business | $199.00 | $90.00 | $300.00 | **$589.00** |
+| Professional | $39.95 | $90.00 | $450.00 | **$579.95** |
+| Business | $199.00 | $60.00 | $300.00 | **$559.00** |
 
-The jump from Professional to Business saves $35/month in telecom costs alone, plus adds the Ads Advisor and custom reporting.
+The jump from Professional to Business saves money on telecom costs at scale, plus adds custom reporting and MCP AI agent access.
 
 ---
 
@@ -223,7 +222,7 @@ You can enable auto-recharge so your balance stays topped up automatically — n
 
 Yes — genuinely free, not "free for 14 days." You do need a license key (even for the free tier), but you generate it right inside the WordPress admin: click **Sign in with Google** (or enter your email for a magic link), and a domain-bound key is created and activated automatically. The free tier gives you GTM injection, GA4 and Search Console connections, native toggles for six ad platforms, attribution tracking, built-in event adapters, header/footer script injection, and a basic call log.
 
-Paid tiers add AI transcription, lead scoring, call recording, advanced attribution, and the Ads Advisor — but the core tracking infrastructure works perfectly without them.
+Paid tiers add AI transcription, lead scoring, call recording, and advanced attribution — but the core tracking infrastructure works perfectly without them.
 
 ### Do I need a Google Tag Manager account?
 

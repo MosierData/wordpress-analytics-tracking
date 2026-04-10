@@ -46,6 +46,7 @@ class ROI_Insights {
 		add_action( 'admin_menu', array( $this, 'register_admin_menu' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_admin_assets' ) );
 		add_action( 'admin_notices', array( $this, 'maybe_show_license_notice' ) );
+		add_action( 'wp_ajax_roi_insights_dismiss_notice', array( $this, 'handle_dismiss_notice' ) );
 	}
 
 	public static function get_instance(): self {
@@ -217,10 +218,26 @@ class ROI_Insights {
 		}
 
 		$settings_url = admin_url( 'admin.php?page=roi-insights#settings' );
+		$nonce        = wp_create_nonce( 'roi_insights_dismiss_notice' );
 		printf(
-			'<div class="notice notice-warning is-dismissible"><p><strong>ROI Insights:</strong> %s <a href="%s">Go to Activation →</a></p></div>',
+			'<div class="notice notice-warning is-dismissible" id="roi-insights-license-notice" data-nonce="%s"><p><strong>ROI Insights:</strong> %s <a href="%s">Go to Activation →</a></p></div>',
+			esc_attr( $nonce ),
 			esc_html( $reason ),
 			esc_url( $settings_url )
 		);
+		// Persist dismissal via AJAX so the notice stays hidden across page loads.
+		echo '<script>document.addEventListener("DOMContentLoaded",function(){var n=document.getElementById("roi-insights-license-notice");if(n){n.addEventListener("click",function(e){if(e.target.classList.contains("notice-dismiss")){var x=new XMLHttpRequest();x.open("POST","' . esc_url( admin_url( 'admin-ajax.php' ) ) . '");x.setRequestHeader("Content-Type","application/x-www-form-urlencoded");x.send("action=roi_insights_dismiss_notice&_wpnonce="+n.dataset.nonce)}})}});</script>' . "\n";
+	}
+
+	/**
+	 * AJAX handler — persist notice dismissal in user meta.
+	 */
+	public function handle_dismiss_notice(): void {
+		check_ajax_referer( 'roi_insights_dismiss_notice' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( null, 403 );
+		}
+		update_user_meta( get_current_user_id(), 'roi_insights_license_notice_dismissed', '1' );
+		wp_send_json_success();
 	}
 }
