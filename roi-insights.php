@@ -4,7 +4,7 @@
  * Plugin URI:        https://roiknowledge.com
  * Description:       All-in-one tag management, ad pixel setup, marketing attribution, call tracking, and AI-powered analytics dashboard for WordPress. Free forever — no credit card required.
  * Version:           1.0.0
- * Requires at least: 6.2
+ * Requires at least: 6.3
  * Tested up to:      6.9
  * Requires PHP:      7.4
  * Author:            MosierData
