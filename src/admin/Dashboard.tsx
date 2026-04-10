@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import type { LicenseData, DashboardStatusDetail } from '../lib/types';
 
-const DASHBOARD_BASE_URL = 'https://my.roiknowledge.com/embed';
+const DASHBOARD_BASE_URL = 'https://my.roiknowledge.com/embed/dashboard';
 
 const font = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif';
 
@@ -431,9 +431,9 @@ export function AdminDashboard( { onNavigateToSettings, refreshKey, isActive }: 
   const [ dashboardStatus, setDashboardStatus ] = useState<string | null>( null );
   const [ statusDetail, setStatusDetail ] = useState<DashboardStatusDetail | undefined>();
 
-  const fetchStatus = useCallback( async () => {
+  const loadLicense = useCallback( async ( endpoint: 'license/validate' | 'license/status' ) => {
     try {
-      const license = await api.get<LicenseData>( 'license/status' );
+      const license = await api.get<LicenseData>( endpoint );
 
       if ( ! license.isValid ) {
         setNotActivated( true );
@@ -471,11 +471,17 @@ export function AdminDashboard( { onNavigateToSettings, refreshKey, isActive }: 
       }
 
       if ( ! license.sessionToken ) {
-        // Account is valid but dashboard embed token isn't available yet.
-        // Show the backfilling state rather than a confusing "re-activate" message.
-        setDashboardStatus( 'backfilling' );
+        // Account is valid but no embed token was returned. If the backend says
+        // the dashboard is ready, this is a provisioning issue — show a specific
+        // message instead of the misleading "building your dashboard" state.
+        if ( status === 'ready' ) {
+          setError( 'Your dashboard is ready, but the session token wasn\'t generated. Please try re-activating your account from the Activation tab, or contact support if this persists.' );
+          setDashboardStatus( null );
+        } else {
+          setDashboardStatus( 'backfilling' );
+          setError( null );
+        }
         setDashboardUrl( null );
-        setError( null );
         return;
       }
 
@@ -491,6 +497,7 @@ export function AdminDashboard( { onNavigateToSettings, refreshKey, isActive }: 
   }, [] );
 
   // Re-fetch whenever the tab becomes active or refreshKey changes.
+  // Force-validate to get a fresh session token on initial/tab-activation loads.
   useEffect( () => {
     if ( isActive === false ) return;
     setDashboardUrl( null );
@@ -498,17 +505,18 @@ export function AdminDashboard( { onNavigateToSettings, refreshKey, isActive }: 
     setNotActivated( false );
     setDashboardStatus( null );
     setStatusDetail( undefined );
-    void fetchStatus();
-  }, [ isActive, refreshKey, fetchStatus ] );
+    void loadLicense( 'license/validate' );
+  }, [ isActive, refreshKey, loadLicense ] );
 
   // Poll every 30s while in a transient state and the tab is active.
+  // Use cached status to avoid hammering the backend on every poll cycle.
   useEffect( () => {
     if ( isActive === false ) return;
     if ( dashboardStatus !== 'email_pending' && dashboardStatus !== 'backfilling' ) return;
 
-    const interval = setInterval( () => void fetchStatus(), 30_000 );
+    const interval = setInterval( () => void loadLicense( 'license/status' ), 30_000 );
     return () => clearInterval( interval );
-  }, [ isActive, dashboardStatus, fetchStatus ] );
+  }, [ isActive, dashboardStatus, loadLicense ] );
 
   if ( notActivated ) {
     return <NotActivatedState onActivate={ onNavigateToSettings } />;

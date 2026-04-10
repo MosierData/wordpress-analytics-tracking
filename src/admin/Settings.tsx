@@ -244,11 +244,12 @@ export function SettingsPage( { onNavigateToDashboard, isActive }: SettingsPageP
       void api.post<{ license_key?: string; license?: LicenseData; error?: string }>( 'license/register', { token: pluginToken } )
         .then( result => {
           if ( result.license_key ) {
-            if ( result.license?.isValid ) {
+            // Use the real license state returned from registration.
+            // showOnboarding renders the wizard before any license-dependent UI,
+            // so we don't need to fake isValid: true here. The wizard's completion
+            // navigates to the Dashboard which force-validates to get a fresh sessionToken.
+            if ( result.license ) {
               setLicense( result.license );
-            } else {
-              setLicense( { isValid: true, isFallback: false, reason: null, tier: 'free', capabilities: [], sessionToken: null, expiresAt: null } );
-              setTimeout( () => { void api.get<LicenseData>( 'license/validate' ).then( setLicense ).catch( () => {} ); }, 3000 );
             }
             setShowOnboarding( true );
           } else {
@@ -343,11 +344,10 @@ export function SettingsPage( { onNavigateToDashboard, isActive }: SettingsPageP
             { token: msg.payload.token }
           );
           if ( result.license_key ) {
-            if ( result.license?.isValid ) {
+            // Use the real license state; showOnboarding bypasses license-dependent UI.
+            // Dashboard's force-validate on navigation provides the fresh sessionToken.
+            if ( result.license ) {
               setLicense( result.license );
-            } else {
-              setLicense( { isValid: true, isFallback: false, reason: null, tier: 'free', capabilities: [], sessionToken: null, expiresAt: null } );
-              setTimeout( () => { void api.get<LicenseData>( 'license/validate' ).then( setLicense ).catch( () => {} ); }, 3000 );
             }
             setShowOnboarding( true );
           } else {
