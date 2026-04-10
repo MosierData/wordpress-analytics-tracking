@@ -151,7 +151,7 @@ class ROI_Insights_API {
 		} catch ( \Throwable $e ) {
 			// phpcs:ignore WordPress.PHP.DevelopmentFunctions
 			error_log( 'roi-insights: license validation failed: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() );
-			wp_send_json_error( array( 'error' => 'Validation failed: ' . $e->getMessage() ), 503 );
+			wp_send_json_error( array( 'error' => 'Validation failed. Please try again or contact support if the issue persists.' ), 503 );
 		}
 	}
 
@@ -239,6 +239,7 @@ class ROI_Insights_API {
 		foreach ( $steps as $idx => $step ) {
 			$result = $this->backend_portal_post( $step['path'], $step['body'] );
 			if ( $result['status'] < 200 || $result['status'] >= 300 ) {
+				$result['body'] = is_array( $result['body'] ) ? $result['body'] : array();
 				$result['body']['failed_step'] = basename( $step['path'] );
 				$result['body']['failed_step_index'] = $idx;
 				$this->send_backend_result( $result );
@@ -251,6 +252,7 @@ class ROI_Insights_API {
 		// ONBOARDING_COMPLETE; duplicate calls are no-ops).
 		$complete = $this->backend_portal_post( '/api/portal/onboarding/complete', new \stdClass() );
 		if ( $complete['status'] < 200 || $complete['status'] >= 300 ) {
+			$complete['body'] = is_array( $complete['body'] ) ? $complete['body'] : array();
 			$complete['body']['failed_step'] = 'complete';
 			$complete['body']['failed_step_index'] = count( $steps );
 			$this->send_backend_result( $complete );

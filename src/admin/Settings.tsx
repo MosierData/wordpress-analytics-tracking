@@ -282,14 +282,19 @@ function ActivatedState( { license, registerMessage, onReconnect, onRerunWizard,
 } ) {
   const [ integrations, setIntegrations ] = useState<IntegrationsData | null>( null );
   const [ loadingIntegrations, setLoadingIntegrations ] = useState( true );
+  const [ integrationsLoadFailed, setIntegrationsLoadFailed ] = useState( false );
   const [ disconnecting, setDisconnecting ] = useState( false );
 
-  useEffect( () => {
+  const loadIntegrations = useCallback( () => {
+    setLoadingIntegrations( true );
+    setIntegrationsLoadFailed( false );
     api.get<IntegrationsData>( 'integrations/get' )
       .then( setIntegrations )
-      .catch( () => {} )
+      .catch( () => setIntegrationsLoadFailed( true ) )
       .finally( () => setLoadingIntegrations( false ) );
   }, [] );
+
+  useEffect( () => { loadIntegrations(); }, [ loadIntegrations ] );
 
   const handleDisconnect = async () => {
     if ( ! window.confirm( 'Disconnect your Google account? Your license key will stay active, but dashboard data will stop updating until you reconnect.' ) ) return;
@@ -339,6 +344,20 @@ function ActivatedState( { license, registerMessage, onReconnect, onRerunWizard,
         </h3>
         { loadingIntegrations ? (
           <p style={ { margin: 0, fontSize: 13, color: colors.textMuted } }>Loading…</p>
+        ) : integrationsLoadFailed ? (
+          <div style={ { display: 'flex', alignItems: 'center', gap: 10 } }>
+            <p style={ { margin: 0, fontSize: 13, color: colors.error } }>Could not load service status.</p>
+            <button
+              onClick={ loadIntegrations }
+              style={ {
+                background: 'none', border: 'none', padding: 0,
+                fontSize: 13, fontWeight: 500, color: colors.primary,
+                cursor: 'pointer', fontFamily: font, textDecoration: 'underline',
+              } }
+            >
+              Retry
+            </button>
+          </div>
         ) : (
           <div style={ { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } }>
             { Object.entries( SERVICE_META ).map( ( [ key, meta ] ) => {
