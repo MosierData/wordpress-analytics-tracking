@@ -1,10 +1,11 @@
 <?php
 /**
- * Plugin Name:       ROI Insights — Marketing Analytics & Call Tracking
+ * Plugin Name:       ROI Insights — Google Tag Manager, Analytics, Tracking Pixels & Call Tracking
  * Plugin URI:        https://roiknowledge.com
- * Description:       GTM, GA4, and ad pixel management with call tracking and a live marketing ROI dashboard. Free forever — upgrade for AI call transcription, lead scoring, and advanced attribution.
+ * Description:       All-in-one tag management, ad pixel setup, marketing attribution, call tracking, and AI-powered analytics dashboard for WordPress. Free forever — no credit card required.
  * Version:           1.0.0
- * Requires at least: 6.2
+ * Requires at least: 6.3
+ * Tested up to:      6.9
  * Requires PHP:      7.4
  * Author:            MosierData
  * Author URI:        https://mosierdata.com
@@ -16,7 +17,7 @@
  */
 
 /*
- * ROI Insights — Marketing Analytics & Call Tracking
+ * ROI Insights — Google Tag Manager, Analytics, Tracking Pixels & Call Tracking
  * Copyright (C) 2026 MosierData
  *
  * This program is free software; you can redistribute it and/or modify

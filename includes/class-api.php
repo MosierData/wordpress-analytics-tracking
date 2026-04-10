@@ -71,7 +71,7 @@ class ROI_Insights_API {
 
 	/** Decode the JSON-encoded 'data' field sent by api.post(). */
 	private function get_body(): array {
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- already verified in verify_request().
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- nonce verified in verify_request(); raw JSON cannot be sanitized with sanitize_text_field() without mangling it. Individual values are sanitized in each handler.
 		$raw     = isset( $_POST['data'] ) ? wp_unslash( $_POST['data'] ) : '{}';
 		$decoded = json_decode( $raw, true );
 		return is_array( $decoded ) ? $decoded : array();

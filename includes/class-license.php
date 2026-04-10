@@ -262,8 +262,12 @@ class ROI_Insights_License {
 
 	/**
 	 * Clear the license cache (e.g., after saving a new key).
+	 * Also resets the notice dismissal flag so any new license issues
+	 * surface immediately instead of staying hidden.
 	 */
 	public function clear_cache(): void {
 		delete_transient( self::CACHE_KEY );
+		delete_transient( self::CACHE_KEY . '_stale' );
+		delete_user_meta( get_current_user_id(), 'roi_insights_license_notice_dismissed' );
 	}
 }
