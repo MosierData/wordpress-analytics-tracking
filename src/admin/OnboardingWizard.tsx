@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { api } from '../lib/api';
-import type { OnboardingData } from '../lib/types';
+import type { OnboardingData, ScanStatus, SiteHints, WebsiteScanResult } from '../lib/types';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -144,6 +144,60 @@ const BUDGET_SCOPES = [
   { id: 'all_marketing', label: 'All marketing spend', description: 'Everything — digital, traditional, vehicle wraps, yard signs, print, events, and more.' },
 ];
 
+// ─── Industry suggestion from site hints ──────────────────────────────────────
+
+/** Map site signals (tagline keywords + plugin signals) to industry IDs. */
+function getSuggestedIndustries( hints?: SiteHints ): string[] {
+  if ( ! hints ) return [];
+  const ids = new Set<string>();
+
+  // Plugin signal → industry
+  const signalMap: Record<string, string[]> = {
+    ecommerce: [ 'retail_ecommerce' ],
+    booking: [ 'professional_services', 'healthcare_medical', 'cleaning_maid' ],
+  };
+  for ( const signal of hints.pluginSignals ) {
+    for ( const id of signalMap[ signal ] ?? [] ) ids.add( id );
+  }
+
+  // Tagline keyword → industry
+  const tagline = ( hints.tagline ?? '' ).toLowerCase();
+  const keywordMap: Record<string, string> = {
+    hvac: 'hvac',
+    'heating': 'hvac',
+    'air conditioning': 'hvac',
+    'cooling': 'hvac',
+    plumb: 'plumbing',
+    electric: 'electrical',
+    roof: 'roofing',
+    landscap: 'landscaping_lawn',
+    'lawn': 'landscaping_lawn',
+    pest: 'pest_control',
+    clean: 'cleaning_maid',
+    maid: 'cleaning_maid',
+    paint: 'painting',
+    'remodel': 'general_contractor',
+    'contractor': 'general_contractor',
+    'construction': 'general_contractor',
+    shed: 'sheds_portable_buildings',
+    'portable building': 'sheds_portable_buildings',
+    'power sport': 'power_sports',
+    atv: 'power_sports',
+    pool: 'outdoor_living',
+    'outdoor': 'outdoor_living',
+    'medical': 'healthcare_medical',
+    'dental': 'healthcare_medical',
+    'health': 'healthcare_medical',
+    'doctor': 'healthcare_medical',
+    'clinic': 'healthcare_medical',
+  };
+  for ( const [ keyword, id ] of Object.entries( keywordMap ) ) {
+    if ( tagline.includes( keyword ) ) ids.add( id );
+  }
+
+  return [ ...ids ];
+}
+
 // ─── CSS keyframes ─────────────────────────────────────────────────────────────
 
 const keyframes = `
@@ -160,6 +214,7 @@ const STEP_LABELS = [ 'Your Website', 'Business Info', 'Priorities', 'Channels',
 interface SelectOption {
   value: string;
   label: string;
+  group?: string;
 }
 
 function SearchableSelect( { options, value, onChange, placeholder }: {
@@ -236,23 +291,38 @@ function SearchableSelect( { options, value, onChange, placeholder }: {
               <div style={ { padding: '12px 16px', fontSize: 13, color: c.textMuted, fontFamily: font } }>
                 No matches found.
               </div>
-            ) : filtered.map( opt => (
-              <div
-                key={ opt.value }
-                onClick={ () => { onChange( opt.value ); setOpen( false ); setQuery( '' ); } }
-                style={ {
-                  padding: '8px 16px', fontSize: 14, fontFamily: font,
-                  cursor: 'pointer',
-                  background: opt.value === value ? c.primaryLight : 'transparent',
-                  color: opt.value === value ? '#166534' : c.textPrimary,
-                  fontWeight: opt.value === value ? 600 : 400,
-                } }
-                onMouseEnter={ e => { if ( opt.value !== value ) ( e.target as HTMLElement ).style.background = c.mutedBg; } }
-                onMouseLeave={ e => { if ( opt.value !== value ) ( e.target as HTMLElement ).style.background = 'transparent'; } }
-              >
-                { opt.label }
-              </div>
-            ) ) }
+            ) : filtered.map( ( opt, i ) => {
+              const prevGroup = i > 0 ? filtered[ i - 1 ].group : undefined;
+              const showHeader = opt.group && opt.group !== prevGroup;
+              return (
+                <React.Fragment key={ opt.value }>
+                  { showHeader && (
+                    <div style={ {
+                      padding: '8px 16px 4px', fontSize: 11, fontWeight: 600,
+                      textTransform: 'uppercase', letterSpacing: '0.06em',
+                      color: c.textMuted, fontFamily: font,
+                      borderTop: i > 0 ? `1px solid ${ c.borderLight }` : 'none',
+                    } }>
+                      { opt.group }
+                    </div>
+                  ) }
+                  <div
+                    onClick={ () => { onChange( opt.value ); setOpen( false ); setQuery( '' ); } }
+                    style={ {
+                      padding: '8px 16px', fontSize: 14, fontFamily: font,
+                      cursor: 'pointer',
+                      background: opt.value === value ? c.primaryLight : 'transparent',
+                      color: opt.value === value ? '#166534' : c.textPrimary,
+                      fontWeight: opt.value === value ? 600 : 400,
+                    } }
+                    onMouseEnter={ e => { if ( opt.value !== value ) ( e.target as HTMLElement ).style.background = c.mutedBg; } }
+                    onMouseLeave={ e => { if ( opt.value !== value ) ( e.target as HTMLElement ).style.background = 'transparent'; } }
+                  >
+                    { opt.label }
+                  </div>
+                </React.Fragment>
+              );
+            } ) }
           </div>
         </div>
       ) }
@@ -272,6 +342,14 @@ export function OnboardingWizard( { onComplete, domain }: OnboardingWizardProps 
   const [ submitting, setSubmitting ] = useState( false );
   const [ submitError, setSubmitError ] = useState<string | null>( null );
 
+  // Scan state (Step 1)
+  const [ scanStatus, setScanStatus ] = useState<ScanStatus>( 'idle' );
+  const [ scanResult, setScanResult ] = useState<WebsiteScanResult | null>( null );
+  const [ scanError, setScanError ] = useState<string | null>( null );
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>( null );
+  const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>( null );
+  const mountedRef = useRef( true );
+
   // Form state
   const [ businessType, setBusinessType ] = useState( '' );
   const [ companySize, setCompanySize ] = useState( '' );
@@ -284,6 +362,90 @@ export function OnboardingWizard( { onComplete, domain }: OnboardingWizardProps 
 
   const siteDomain = domain ?? ( typeof window !== 'undefined' ? window.location.hostname : 'your site' );
 
+  // Clean up polling on unmount
+  useEffect( () => {
+    return () => {
+      mountedRef.current = false;
+      if ( pollRef.current ) clearTimeout( pollRef.current );
+      if ( scanTimeoutRef.current ) clearTimeout( scanTimeoutRef.current );
+    };
+  }, [] );
+
+  const startScan = async () => {
+    setScanStatus( 'scanning' );
+    setScanError( null );
+    setScanResult( null );
+
+    try {
+      const siteUrl = typeof window !== 'undefined' ? window.location.origin : `https://${ siteDomain }`;
+      await api.post( 'onboarding/scan', { url: siteUrl } );
+    } catch ( err ) {
+      if ( ! mountedRef.current ) return;
+      // eslint-disable-next-line no-console
+      console.error( 'roi-insights: scan failed', err );
+      const msg = err && typeof err === 'object' && 'message' in ( err as Record<string, unknown> )
+        ? ( err as { message: string } ).message
+        : 'Could not start the scan.';
+      setScanStatus( 'failed' );
+      setScanError( `${ msg } You can skip this step and continue.` );
+      return;
+    }
+
+    if ( ! mountedRef.current ) return;
+
+    // Poll with backoff: 3s → 5s → 8s → 10s (capped). Max 20 attempts as circuit breaker.
+    let pollAttempts = 0;
+    const MAX_POLL_ATTEMPTS = 20;
+    const schedulePoll = ( delay: number ) => {
+      pollRef.current = setTimeout( async () => {
+        pollAttempts++;
+        if ( pollAttempts > MAX_POLL_ATTEMPTS ) {
+          if ( scanTimeoutRef.current ) clearTimeout( scanTimeoutRef.current );
+          if ( mountedRef.current ) {
+            setScanStatus( 'failed' );
+            setScanError( 'Scan did not complete in time. You can continue setup.' );
+          }
+          return;
+        }
+        try {
+          const state = await api.get<{ website_scan?: WebsiteScanResult }>( 'onboarding/state' );
+          if ( ! mountedRef.current ) return;
+          const scan = state?.website_scan;
+          if ( ! scan ) {
+            schedulePoll( Math.min( delay + 2000, 10000 ) );
+            return;
+          }
+
+          const terminal: ScanStatus[] = [ 'succeeded', 'partial', 'failed' ];
+          if ( terminal.includes( scan.status ) ) {
+            if ( scanTimeoutRef.current ) clearTimeout( scanTimeoutRef.current );
+            setScanStatus( scan.status );
+            setScanResult( scan );
+          } else {
+            schedulePoll( Math.min( delay + 2000, 10000 ) );
+          }
+        } catch {
+          // Polling failure is non-fatal — keep trying with backoff until max attempts
+          if ( mountedRef.current ) schedulePoll( Math.min( delay + 2000, 10000 ) );
+        }
+      }, delay );
+    };
+    schedulePoll( 3000 );
+
+    // 60s safety timeout
+    scanTimeoutRef.current = setTimeout( () => {
+      if ( pollRef.current ) clearTimeout( pollRef.current );
+      if ( ! mountedRef.current ) return;
+      setScanStatus( prev => {
+        if ( prev === 'scanning' ) {
+          setScanError( 'Scan is taking longer than expected. You can continue setup — results will appear on your dashboard.' );
+          return 'failed';
+        }
+        return prev;
+      } );
+    }, 60000 );
+  };
+
   // Merged business options: legacy types + Google Business categories (lazy-loaded), sorted
   const [ gbpCategories, setGbpCategories ] = useState<{ id: string; label: string }[]>( [] );
 
@@ -293,16 +455,28 @@ export function OnboardingWizard( { onComplete, domain }: OnboardingWizardProps 
       .catch( () => {} );
   }, [] );
 
+  const hints = typeof window !== 'undefined' ? window.roiInsights?.siteHints : undefined;
+  const suggestedIds = useMemo( () => getSuggestedIndustries( hints ), [ hints ] );
+
   const businessOptions = useMemo( () => {
     const legacyIds = new Set( LEGACY_BUSINESS_TYPES.map( b => b.id ) );
     const legacy = LEGACY_BUSINESS_TYPES.map( ( { id, label } ) => ( { value: id, label } ) );
     const fromGbp = gbpCategories
       .filter( row => ! legacyIds.has( row.id ) )
       .map( row => ( { value: row.id, label: row.label } ) );
-    return [ ...legacy, ...fromGbp ].sort( ( a, b ) =>
+    const all = [ ...legacy, ...fromGbp ].sort( ( a, b ) =>
       a.label.localeCompare( b.label, undefined, { sensitivity: 'base' } )
     );
-  }, [ gbpCategories ] );
+
+    if ( suggestedIds.length === 0 ) return all;
+
+    const suggestedSet = new Set( suggestedIds );
+    const suggested = all
+      .filter( o => suggestedSet.has( o.value ) )
+      .map( o => ( { ...o, group: 'Suggested for you' } ) );
+    const rest = all.filter( o => ! suggestedSet.has( o.value ) );
+    return [ ...suggested, ...rest ];
+  }, [ gbpCategories, suggestedIds ] );
 
   // Reset company size if the category changes (trucks → employees, etc.)
   // Also reset channel defaults so they recompute for the new industry.
@@ -347,7 +521,7 @@ export function OnboardingWizard( { onComplete, domain }: OnboardingWizardProps 
 
   const canAdvance = (): boolean => {
     switch ( step ) {
-      case 0: return true;
+      case 0: return [ 'succeeded', 'partial', 'failed' ].includes( scanStatus );
       case 1: return !! businessType && !! companySize;
       case 2: return priorities.length === MAX_PRIORITIES;
       case 3: return leadSources.length >= 1;
@@ -382,63 +556,205 @@ export function OnboardingWizard( { onComplete, domain }: OnboardingWizardProps 
 
   // ─── Step renderers ────────────────────────────────────────────────────────
 
-  const renderWebsiteAnalysis = () => (
-    <div style={ { animation: 'roi-wizard-fadeIn 0.3s ease' } }>
-      <h2 style={ { margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: c.textPrimary, fontFamily: font } }>
-        We'll analyze your website
-      </h2>
-      <p style={ { margin: '0 0 28px', fontSize: 14, color: c.textSecondary, lineHeight: 1.6 } }>
-        We'll scan <strong>{ siteDomain }</strong> to detect your existing tracking setup and marketing tools.
-      </p>
+  const SCAN_TOOLS = [
+    { key: 'ga4', label: 'Google Analytics (GA4)', desc: 'Measurement ID & configuration' },
+    { key: 'google_ads', label: 'Google Ads', desc: 'Conversion tracking & remarketing tags' },
+    { key: 'search_console', label: 'Search Console', desc: 'Organic search performance data' },
+    { key: 'meta_pixel', label: 'Meta Pixel', desc: 'Facebook/Instagram tracking pixel' },
+    { key: 'call_tracking', label: 'Call Tracking', desc: 'Dynamic number insertion scripts' },
+    { key: 'gtm', label: 'Tag Manager', desc: 'GTM container & tag inventory' },
+  ];
 
-      <div style={ {
-        background: '#0f172a', borderRadius: 10, padding: '24px 28px', marginBottom: 20,
-        position: 'relative', overflow: 'hidden',
-      } }>
-        <div style={ {
-          position: 'absolute', top: 0, bottom: 0, width: '30%',
-          background: 'linear-gradient(90deg, transparent, rgba(22,163,74,0.08), transparent)',
-          animation: 'roi-wizard-scan 2.5s ease-in-out infinite',
-        } } />
+  const renderWebsiteAnalysis = () => {
+    // ── Results state ──
+    if ( scanStatus === 'succeeded' || scanStatus === 'partial' || ( scanStatus === 'failed' && scanResult ) ) {
+      const ids = scanResult?.tracking_ids ?? {};
+      const flags = scanResult?.analysis?.flags ?? [];
+      return (
+        <div style={ { animation: 'roi-wizard-fadeIn 0.3s ease' } }>
+          <h2 style={ { margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: c.textPrimary, fontFamily: font } }>
+            { scanStatus === 'succeeded' ? 'Scan complete' : 'Partial results' }
+          </h2>
+          <p style={ { margin: '0 0 24px', fontSize: 14, color: c.textSecondary, lineHeight: 1.6 } }>
+            Here's what we found on <strong>{ siteDomain }</strong>.
+          </p>
 
-        <p style={ { margin: '0 0 16px', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: c.textMuted } }>
-          What we look for
-        </p>
-        <div style={ { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 } }>
-          { [
-            { label: 'Google Analytics (GA4)', desc: 'Measurement ID & configuration' },
-            { label: 'Google Ads', desc: 'Conversion tracking & remarketing tags' },
-            { label: 'Search Console', desc: 'Organic search performance data' },
-            { label: 'Meta Pixel', desc: 'Facebook/Instagram tracking pixel' },
-            { label: 'Call Tracking', desc: 'Dynamic number insertion scripts' },
-            { label: 'Tag Manager', desc: 'GTM container & tag inventory' },
-          ].map( ( item, i ) => (
-            <div key={ i } style={ {
-              display: 'flex', alignItems: 'flex-start', gap: 10,
-              padding: '10px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: 6,
-              border: '1px solid rgba(255,255,255,0.06)',
+          <div style={ { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: flags.length ? 16 : 0 } }>
+            { SCAN_TOOLS.map( tool => {
+              const detected = ids[ tool.key ];
+              return (
+                <div key={ tool.key } style={ {
+                  display: 'flex', alignItems: 'flex-start', gap: 10,
+                  padding: '12px 14px', background: detected ? c.primaryLight : c.mutedBg,
+                  borderRadius: 8, border: `1px solid ${ detected ? c.primaryBorder : c.border }`,
+                } }>
+                  <span style={ {
+                    width: 20, height: 20, borderRadius: '50%', flexShrink: 0, marginTop: 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: detected ? c.primary : c.border,
+                  } }>
+                    { detected ? (
+                      <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
+                        <path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    ) : (
+                      <span style={ { width: 8, height: 2, background: '#94a3b8', borderRadius: 1 } } />
+                    ) }
+                  </span>
+                  <div style={ { minWidth: 0 } }>
+                    <p style={ { margin: 0, fontSize: 13, fontWeight: 500, color: c.textPrimary } }>{ tool.label }</p>
+                    <p style={ { margin: '2px 0 0', fontSize: 11, color: detected ? '#166534' : c.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }>
+                      { detected || 'Not detected' }
+                    </p>
+                  </div>
+                </div>
+              );
+            } ) }
+          </div>
+
+          { flags.length > 0 && (
+            <div style={ {
+              padding: '12px 16px', background: '#fffbeb', border: '1px solid #fde68a',
+              borderRadius: 8, fontSize: 13, color: '#92400e', lineHeight: 1.6,
             } }>
-              <span style={ {
-                width: 8, height: 8, borderRadius: '50%', background: c.primary,
-                marginTop: 5, flexShrink: 0, opacity: 0.7,
-              } } />
-              <div>
-                <p style={ { margin: 0, fontSize: 13, fontWeight: 500, color: '#e2e8f0' } }>{ item.label }</p>
-                <p style={ { margin: '2px 0 0', fontSize: 11, color: '#64748b' } }>{ item.desc }</p>
-              </div>
+              <p style={ { margin: '0 0 4px', fontWeight: 600 } }>Heads up</p>
+              { flags.map( ( flag, i ) => <p key={ i } style={ { margin: '2px 0' } }>{ flag }</p> ) }
             </div>
-          ) ) }
+          ) }
         </div>
-      </div>
+      );
+    }
 
-      <div style={ {
-        padding: '14px 16px', background: c.primaryLight, border: `1px solid ${ c.primaryBorder }`,
-        borderRadius: 8, fontSize: 13, color: '#166534', lineHeight: 1.6,
-      } }>
-        This takes a few seconds after you finish setup. We'll show you the results before your dashboard builds.
+    // ── Scanning state ──
+    if ( scanStatus === 'scanning' || scanStatus === 'pending' ) {
+      return (
+        <div style={ { animation: 'roi-wizard-fadeIn 0.3s ease' } }>
+          <h2 style={ { margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: c.textPrimary, fontFamily: font } }>
+            Scanning your website…
+          </h2>
+          <p style={ { margin: '0 0 28px', fontSize: 14, color: c.textSecondary, lineHeight: 1.6 } }>
+            Analyzing <strong>{ siteDomain }</strong> for tracking tools and marketing integrations.
+          </p>
+
+          <div style={ {
+            background: '#0f172a', borderRadius: 10, padding: '24px 28px',
+            position: 'relative', overflow: 'hidden',
+          } }>
+            <div style={ {
+              position: 'absolute', top: 0, bottom: 0, width: '30%',
+              background: 'linear-gradient(90deg, transparent, rgba(22,163,74,0.15), transparent)',
+              animation: 'roi-wizard-scan 2.5s ease-in-out infinite',
+            } } />
+
+            <div style={ { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 } }>
+              { SCAN_TOOLS.map( tool => (
+                <div key={ tool.key } style={ {
+                  display: 'flex', alignItems: 'flex-start', gap: 10,
+                  padding: '10px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: 6,
+                  border: '1px solid rgba(255,255,255,0.06)',
+                } }>
+                  <span style={ {
+                    width: 8, height: 8, borderRadius: '50%', background: c.primary,
+                    marginTop: 5, flexShrink: 0, opacity: 0.7,
+                  } } />
+                  <div>
+                    <p style={ { margin: 0, fontSize: 13, fontWeight: 500, color: '#e2e8f0' } }>{ tool.label }</p>
+                    <p style={ { margin: '2px 0 0', fontSize: 11, color: '#64748b' } }>{ tool.desc }</p>
+                  </div>
+                </div>
+              ) ) }
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Failed without results ──
+    if ( scanStatus === 'failed' ) {
+      return (
+        <div style={ { animation: 'roi-wizard-fadeIn 0.3s ease' } }>
+          <h2 style={ { margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: c.textPrimary, fontFamily: font } }>
+            Scan couldn't complete
+          </h2>
+          <p style={ { margin: '0 0 20px', fontSize: 14, color: c.textSecondary, lineHeight: 1.6 } }>
+            { scanError || 'Something went wrong scanning your site.' }
+          </p>
+          <div style={ { display: 'flex', gap: 10 } }>
+            <button
+              onClick={ () => void startScan() }
+              style={ {
+                padding: '9px 18px', background: '#fff',
+                border: `1px solid ${ c.border }`, borderRadius: 6,
+                fontSize: 13, fontWeight: 500, fontFamily: font,
+                color: c.textPrimary, cursor: 'pointer',
+              } }
+            >
+              Try again
+            </button>
+          </div>
+          <p style={ { margin: '16px 0 0', fontSize: 13, color: c.textMuted } }>
+            You can also skip this step and continue setup.
+          </p>
+        </div>
+      );
+    }
+
+    // ── Idle state (default) ──
+    return (
+      <div style={ { animation: 'roi-wizard-fadeIn 0.3s ease' } }>
+        <h2 style={ { margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: c.textPrimary, fontFamily: font } }>
+          Let's analyze your website
+        </h2>
+        <p style={ { margin: '0 0 28px', fontSize: 14, color: c.textSecondary, lineHeight: 1.6 } }>
+          We'll scan <strong>{ siteDomain }</strong> to detect your existing tracking setup and marketing tools.
+        </p>
+
+        <div style={ {
+          background: '#0f172a', borderRadius: 10, padding: '24px 28px', marginBottom: 20,
+          position: 'relative', overflow: 'hidden',
+        } }>
+          <p style={ { margin: '0 0 16px', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: c.textMuted } }>
+            What we look for
+          </p>
+          <div style={ { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 } }>
+            { SCAN_TOOLS.map( tool => (
+              <div key={ tool.key } style={ {
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+                padding: '10px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: 6,
+                border: '1px solid rgba(255,255,255,0.06)',
+              } }>
+                <span style={ {
+                  width: 8, height: 8, borderRadius: '50%', background: c.primary,
+                  marginTop: 5, flexShrink: 0, opacity: 0.7,
+                } } />
+                <div>
+                  <p style={ { margin: 0, fontSize: 13, fontWeight: 500, color: '#e2e8f0' } }>{ tool.label }</p>
+                  <p style={ { margin: '2px 0 0', fontSize: 11, color: '#64748b' } }>{ tool.desc }</p>
+                </div>
+              </div>
+            ) ) }
+          </div>
+        </div>
+
+        <button
+          onClick={ () => void startScan() }
+          style={ {
+            width: '100%', padding: '12px 24px',
+            background: c.primary, color: '#fff',
+            border: 'none', borderRadius: 8,
+            fontSize: 14, fontWeight: 600, fontFamily: font,
+            cursor: 'pointer', transition: 'background 0.15s',
+          } }
+        >
+          Scan My Website
+        </button>
+
+        <p style={ { margin: '12px 0 0', fontSize: 12, color: c.textMuted, textAlign: 'center' } }>
+          This usually takes 10-30 seconds.
+        </p>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderBusinessContext = () => (
     <div style={ { animation: 'roi-wizard-fadeIn 0.3s ease' } }>
@@ -864,6 +1180,17 @@ export function OnboardingWizard( { onComplete, domain }: OnboardingWizardProps 
             } }
           >
             Back
+          </button>
+        ) : step === 0 && ( scanStatus === 'idle' || scanStatus === 'scanning' || scanStatus === 'pending' ) ? (
+          <button
+            onClick={ () => { setScanStatus( 'failed' ); if ( pollRef.current ) clearTimeout( pollRef.current ); if ( scanTimeoutRef.current ) clearTimeout( scanTimeoutRef.current ); } }
+            style={ {
+              background: 'none', border: 'none', padding: 0,
+              fontSize: 13, fontWeight: 500, color: c.textMuted,
+              cursor: 'pointer', fontFamily: font, textDecoration: 'underline',
+            } }
+          >
+            Skip scan
           </button>
         ) : (
           <div />

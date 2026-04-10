@@ -46,7 +46,7 @@ function pathToAction( path: string ): { action: string; extras: Record<string, 
   return { action, extras };
 }
 
-function ajax<T>( path: string, method: 'GET' | 'POST', data?: unknown ): Promise<T> {
+function ajax<T>( path: string, data?: unknown ): Promise<T> {
   const { action, extras } = pathToAction( path );
 
   const postData: Record<string, string> = {
@@ -59,10 +59,13 @@ function ajax<T>( path: string, method: 'GET' | 'POST', data?: unknown ): Promis
     postData.data = JSON.stringify( data );
   }
 
+  // Always use POST so the nonce is never exposed in URL query strings
+  // (Cloudflare/CDN access logs, browser history). admin-ajax.php accepts
+  // POST for all actions regardless of the original semantic method.
   return new Promise<T>( ( resolve, reject ) => {
     jQuery.ajax( {
       url:      roiInsights.ajaxUrl,
-      type:     method,
+      type:     'POST',
       data:     postData,
       dataType: 'json',
       success( response: unknown ) {
@@ -96,9 +99,9 @@ function ajax<T>( path: string, method: 'GET' | 'POST', data?: unknown ): Promis
 
 export const api = {
   get<T>( path: string ): Promise<T> {
-    return ajax<T>( path, 'GET' );
+    return ajax<T>( path );
   },
   post<T>( path: string, data: unknown ): Promise<T> {
-    return ajax<T>( path, 'POST', data );
+    return ajax<T>( path, data );
   },
 };

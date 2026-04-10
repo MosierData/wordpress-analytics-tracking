@@ -132,7 +132,44 @@ class ROI_Insights {
 				'capabilities' => $license_data['capabilities'] ?? array(),
 				'isValid'      => (bool) $license_data['isValid'],
 				'hasKey'       => ! empty( $this->settings->get_license_key() ),
+				'siteHints'    => $this->get_site_hints(),
 			)
+		);
+	}
+
+	// ─── Site Hints ─────────────────────────────────────────────────────────────
+
+	/**
+	 * Gather WordPress site signals to suggest likely industries in onboarding.
+	 *
+	 * @return array{tagline:string,pluginSignals:string[],domain:string}
+	 */
+	private function get_site_hints(): array {
+		$signals = array();
+
+		// Check active plugin slugs for keywords that indicate a vertical.
+		$active = (array) get_option( 'active_plugins', array() );
+		$plugin_keywords = array(
+			'woocommerce'  => 'ecommerce',
+			'easy-digital' => 'ecommerce',
+			'edd-'         => 'ecommerce',
+			'booking'      => 'booking',
+			'appointmen'   => 'booking',
+		);
+
+		foreach ( $active as $plugin_path ) {
+			$slug = strtolower( basename( dirname( $plugin_path ) ) );
+			foreach ( $plugin_keywords as $keyword => $signal ) {
+				if ( false !== strpos( $slug, $keyword ) ) {
+					$signals[] = $signal;
+				}
+			}
+		}
+
+		return array(
+			'tagline'       => (string) get_bloginfo( 'description' ),
+			'pluginSignals' => array_values( array_unique( $signals ) ),
+			'domain'        => wp_parse_url( home_url(), PHP_URL_HOST ),
 		);
 	}
 
@@ -167,10 +204,11 @@ class ROI_Insights {
 		}
 
 		$reason_map = array(
-			'api_error'         => 'Could not reach the license server. Tracking is still active.',
-			'invalid_signature' => 'License signature is invalid. Please re-enter your key.',
-			'expired'           => 'Your license has expired. Please renew to restore premium features.',
-			'missing_key'       => '',
+			'api_error'            => 'Could not reach the license server. Tracking is still active.',
+			'invalid_signature'    => 'License signature is invalid. Please re-enter your key.',
+			'expired'              => 'Your license has expired. Please renew to restore premium features.',
+			'sodium_unavailable'   => 'Your server\'s PHP sodium extension is not available. Contact your hosting provider to enable it.',
+			'missing_key'          => '',
 		);
 
 		$reason = $reason_map[ $data['reason'] ?? '' ] ?? 'License issue detected.';

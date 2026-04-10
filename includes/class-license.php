@@ -59,19 +59,17 @@ class ROI_Insights_License {
 		);
 
 		if ( is_wp_error( $response ) ) {
-			// Fail-open: return cached if available, otherwise invalid with api_error.
-			$stale = get_transient( self::CACHE_KEY . '_stale' );
-			if ( false !== $stale ) {
-				$data               = (array) $stale;
-				$data['isFallback'] = true;
-				return $data;
-			}
-			return $this->invalid( 'api_error' );
+			return $this->stale_or_invalid();
 		}
 
 		$code     = wp_remote_retrieve_response_code( $response );
 		$raw_body = wp_remote_retrieve_body( $response );
 		$body     = json_decode( $raw_body, true );
+
+		// On server errors (5xx), try stale cache before giving up.
+		if ( (int) $code >= 500 ) {
+			return $this->stale_or_invalid();
+		}
 
 		if ( 200 !== (int) $code || ! is_array( $body ) ) {
 			return $this->invalid( 'api_error' );
@@ -82,18 +80,21 @@ class ROI_Insights_License {
 			error_log( 'roi-insights: validate response keys: ' . implode( ', ', array_keys( $body ) ) );
 		}
 
+		if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ) {
+			return $this->invalid( 'sodium_unavailable' );
+		}
+
 		$verified = null;
 
 		// Format 1: signed token object { payload: "...", signature: "..." }.
 		if ( ! empty( $body['token'] ) && is_array( $body['token'] ) ) {
 			$verified = $this->verify_token( $body['token'] );
 		}
-		// Format 2: signed token as a JWT-style dot-separated string.
+		// Format 2: compact token — base64(json_payload).base64(ed25519_signature).
+		// Not a JWT (which has 3 parts: header.payload.signature).
 		elseif ( ! empty( $body['token'] ) && is_string( $body['token'] ) ) {
-			$verified = $this->verify_jwt_token( $body['token'] );
+			$verified = $this->verify_compact_token( $body['token'] );
 		}
-		// Format 3 removed — inline data without a signature is not trustworthy.
-		// If the backend needs to send unsigned data, it should be wrapped in a signed token.
 
 		if ( null === $verified ) {
 			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
@@ -103,7 +104,8 @@ class ROI_Insights_License {
 			return $this->invalid( 'invalid_signature' );
 		}
 
-		if ( ( $verified['exp'] ?? 0 ) < time() ) {
+		// 60-second leeway to account for clock skew between server and token issuer.
+		if ( ( $verified['exp'] ?? 0 ) < ( time() - 60 ) ) {
 			return $this->invalid( 'expired' );
 		}
 
@@ -128,7 +130,8 @@ class ROI_Insights_License {
 		// but the embedded session token is typically short-lived.
 		$ttl = min( 15 * MINUTE_IN_SECONDS, max( 60, $verified['exp'] - time() ) );
 		set_transient( self::CACHE_KEY, $data, $ttl );
-		set_transient( self::CACHE_KEY . '_stale', $data, DAY_IN_SECONDS * 7 );
+		$stale_data = array_merge( $data, array( '_cached_at' => time() ) );
+		set_transient( self::CACHE_KEY . '_stale', $stale_data, DAY_IN_SECONDS * 7 );
 
 		return $data;
 	}
@@ -144,6 +147,8 @@ class ROI_Insights_License {
 	/**
 	 * Verify a signed token object { payload: "base64...", signature: "base64..." }.
 	 * Ed25519 signature is verified against the decoded payload bytes.
+	 *
+	 * Caller must ensure sodium is available before calling (checked in get_license_data).
 	 */
 	private function verify_token( array $token ): ?array {
 		$payload_b64   = $token['payload'] ?? '';
@@ -160,11 +165,42 @@ class ROI_Insights_License {
 			return null;
 		}
 
-		if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ) {
-			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-				// phpcs:ignore WordPress.PHP.DevelopmentFunctions
-				error_log( 'roi-insights: sodium extension not available — cannot verify signature' );
-			}
+		$public_key = base64_decode( self::PUBLIC_KEY );
+
+		try {
+			$valid = sodium_crypto_sign_verify_detached( $signature, $payload, $public_key );
+		} catch ( \Exception $e ) {
+			return null;
+		}
+
+		if ( ! $valid ) {
+			return null;
+		}
+
+		$decoded = json_decode( $payload, true );
+		return is_array( $decoded ) ? $decoded : null;
+	}
+
+	/**
+	 * Verify a compact token: base64(json_payload).base64(ed25519_signature).
+	 *
+	 * This is NOT a JWT (which has 3 parts: header.payload.signature with an
+	 * algorithm header). This format is 2 parts only: payload + Ed25519 sig.
+	 * Backend uses standard base64, not base64url.
+	 *
+	 * Caller must ensure sodium is available before calling (checked in get_license_data).
+	 */
+	private function verify_compact_token( string $token ): ?array {
+		$parts = explode( '.', $token );
+
+		if ( count( $parts ) !== 2 ) {
+			return null;
+		}
+
+		$payload   = base64_decode( $parts[0] );
+		$signature = base64_decode( $parts[1] );
+
+		if ( empty( $payload ) || empty( $signature ) ) {
 			return null;
 		}
 
@@ -185,47 +221,28 @@ class ROI_Insights_License {
 	}
 
 	/**
-	 * Verify a dot-separated token: base64(json_payload).base64(ed25519_signature).
-	 *
-	 * Backend format uses standard base64 (not base64url). Signature is verified
-	 * against the decoded payload bytes, not the base64 string.
+	 * Return stale cached data if available and less than 24 hours old,
+	 * otherwise return an api_error invalid response.
 	 */
-	private function verify_jwt_token( string $jwt ): ?array {
-		$parts = explode( '.', $jwt );
-
-		if ( count( $parts ) !== 2 ) {
-			return null;
-		}
-
-		$payload   = base64_decode( $parts[0] );
-		$signature = base64_decode( $parts[1] );
-
-		if ( empty( $payload ) || empty( $signature ) ) {
-			return null;
-		}
-
+	private function stale_or_invalid(): array {
+		// Don't return stale valid data if sodium is unavailable — the stale data
+		// was verified with sodium, but we can't re-verify now. Fail fast so the
+		// admin notice surfaces the sodium_unavailable message.
 		if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ) {
-			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-				// phpcs:ignore WordPress.PHP.DevelopmentFunctions
-				error_log( 'roi-insights: sodium extension not available — cannot verify signature' );
+			return $this->invalid( 'sodium_unavailable' );
+		}
+
+		$stale = get_transient( self::CACHE_KEY . '_stale' );
+		if ( false !== $stale ) {
+			$data = (array) $stale;
+			$stale_age = time() - (int) ( $data['_cached_at'] ?? 0 );
+			if ( $stale_age < DAY_IN_SECONDS ) {
+				$data['isFallback'] = true;
+				unset( $data['_cached_at'] );
+				return $data;
 			}
-			return null;
 		}
-
-		$public_key = base64_decode( self::PUBLIC_KEY );
-
-		try {
-			$valid = sodium_crypto_sign_verify_detached( $signature, $payload, $public_key );
-		} catch ( \Exception $e ) {
-			return null;
-		}
-
-		if ( ! $valid ) {
-			return null;
-		}
-
-		$decoded = json_decode( $payload, true );
-		return is_array( $decoded ) ? $decoded : null;
+		return $this->invalid( 'api_error' );
 	}
 
 	/**

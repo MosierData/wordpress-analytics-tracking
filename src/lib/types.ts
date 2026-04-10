@@ -19,13 +19,24 @@ export interface DashboardStatusDetail {
 export interface LicenseData {
   isValid: boolean;
   isFallback?: boolean;
-  reason?: 'missing_key' | 'api_error' | 'invalid_signature' | 'expired' | 'not_validated';
+  reason?: 'missing_key' | 'api_error' | 'invalid_signature' | 'expired' | 'not_validated' | 'sodium_unavailable';
   tier?: LicenseTier;
   capabilities: LicenseCapability[];
   sessionToken?: string;
   expiresAt?: number;
   dashboardStatus?: DashboardStatus;
   dashboardStatusDetail?: DashboardStatusDetail;
+}
+
+export type ScanStatus = 'idle' | 'pending' | 'scanning' | 'succeeded' | 'partial' | 'failed';
+
+export interface WebsiteScanResult {
+  scan_id?: string;
+  status: ScanStatus;
+  tech_stack?: Record<string, string[]>;
+  tracking_ids?: Record<string, string>;
+  analysis?: { flags?: string[] };
+  scanned_at?: string;
 }
 
 export interface OnboardingData {
@@ -37,6 +48,31 @@ export interface OnboardingData {
   budget_scope: string;
 }
 
+export type IntegrationStatus = 'connected' | 'syncing' | 'warning' | 'error' | 'disconnected' | 'not_configured';
+
+export interface IntegrationService {
+  status: IntegrationStatus;
+  account_name?: string;
+  property_name?: string;
+  site_url?: string;
+  last_synced_at: string | null;
+  error_message: string | null;
+}
+
+export interface IntegrationsData {
+  google?: { email?: string; connected_at?: string };
+  ga4?: IntegrationService;
+  gsc?: IntegrationService;
+  gbp?: IntegrationService;
+  ads?: IntegrationService;
+}
+
+export interface SiteHints {
+  tagline: string;
+  pluginSignals: string[];
+  domain: string;
+}
+
 /** Injected by PHP via wp_localize_script as window.roiInsights */
 export interface RoiInsightsGlobal {
   nonce: string;
@@ -45,6 +81,7 @@ export interface RoiInsightsGlobal {
   capabilities: LicenseCapability[];
   isValid: boolean;
   hasKey: boolean;
+  siteHints?: SiteHints;
 }
 
 declare global {

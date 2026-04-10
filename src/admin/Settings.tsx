@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../lib/api';
-import type { LicenseData, OnboardingData } from '../lib/types';
+import type { LicenseData, OnboardingData, IntegrationsData, IntegrationService, DashboardStatus } from '../lib/types';
 import { OnboardingWizard } from './OnboardingWizard';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
@@ -203,6 +203,254 @@ function GoogleSignInTroubleshooting() {
   );
 }
 
+// ─── Activated State (4-card layout) ───────────────────────────────────────────
+
+const SERVICE_META: Record<string, { label: string; icon: string }> = {
+  ga4:  { label: 'Google Analytics (GA4)', icon: '📊' },
+  ads:  { label: 'Google Ads',             icon: '📢' },
+  gsc:  { label: 'Search Console',         icon: '🔍' },
+  gbp:  { label: 'Business Profile',       icon: '📍' },
+};
+
+function ServiceStatusBadge( { service }: { service?: IntegrationService } ) {
+  if ( ! service ) return <StatusBadge label="Not configured" variant="disabled" />;
+  switch ( service.status ) {
+    case 'connected': case 'syncing': return <StatusBadge label={ service.status === 'syncing' ? 'Syncing' : 'Connected' } variant="connected" />;
+    case 'warning': return <StatusBadge label="Warning" variant="warning" />;
+    case 'error': return <StatusBadge label="Error" variant="error" />;
+    default: return <StatusBadge label="Not connected" variant="disabled" />;
+  }
+}
+
+function formatRelativeTime( iso: string | null ): string {
+  if ( ! iso ) return 'Never';
+  const diff = Date.now() - new Date( iso ).getTime();
+  const mins = Math.floor( diff / 60000 );
+  if ( mins < 1 ) return 'Just now';
+  if ( mins < 60 ) return `${ mins }m ago`;
+  const hours = Math.floor( mins / 60 );
+  if ( hours < 24 ) return `${ hours }h ago`;
+  return `${ Math.floor( hours / 24 ) }d ago`;
+}
+
+function DashboardStatusCard( { status, detail }: { status?: DashboardStatus; detail?: { started_at?: string; estimated_ready_at?: string; progress_pct?: number } } ) {
+  if ( ! status || status === 'ready' ) {
+    return (
+      <div style={ { display: 'flex', alignItems: 'center', gap: 8 } }>
+        <span style={ { width: 10, height: 10, borderRadius: '50%', background: colors.success } } />
+        <span style={ { fontSize: 13, color: colors.textSecondary } }>Dashboard ready</span>
+      </div>
+    );
+  }
+  if ( status === 'backfilling' ) {
+    const pct = detail?.progress_pct ?? 0;
+    return (
+      <div>
+        <div style={ { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 } }>
+          <span style={ { fontSize: 13, color: colors.textSecondary } }>Building your dashboard…</span>
+          <span style={ { fontSize: 12, color: colors.textMuted } }>{ pct }%</span>
+        </div>
+        <div style={ { height: 6, borderRadius: 3, background: '#e2e8f0', overflow: 'hidden' } }>
+          <div style={ { height: '100%', width: `${ pct }%`, background: colors.primary, borderRadius: 3, transition: 'width 0.3s' } } />
+        </div>
+        <p style={ { margin: '6px 0 0', fontSize: 12, color: colors.textMuted } }>This usually takes about an hour.</p>
+      </div>
+    );
+  }
+  if ( status === 'email_pending' ) {
+    return (
+      <div style={ { display: 'flex', alignItems: 'center', gap: 8 } }>
+        <span style={ { fontSize: 13, color: colors.warning } }>Check your email to finish setup</span>
+      </div>
+    );
+  }
+  // error
+  return (
+    <div style={ { display: 'flex', alignItems: 'center', gap: 8 } }>
+      <span style={ { width: 10, height: 10, borderRadius: '50%', background: colors.error } } />
+      <span style={ { fontSize: 13, color: colors.error } }>Dashboard error — try re-running setup</span>
+    </div>
+  );
+}
+
+function ActivatedState( { license, registerMessage, onReconnect, onRerunWizard, reconnecting }: {
+  license: LicenseData;
+  registerMessage: string;
+  onReconnect: () => void;
+  onRerunWizard: () => void;
+  reconnecting: boolean;
+} ) {
+  const [ integrations, setIntegrations ] = useState<IntegrationsData | null>( null );
+  const [ loadingIntegrations, setLoadingIntegrations ] = useState( true );
+  const [ integrationsLoadFailed, setIntegrationsLoadFailed ] = useState( false );
+  const [ disconnecting, setDisconnecting ] = useState( false );
+
+  const loadIntegrations = useCallback( () => {
+    setLoadingIntegrations( true );
+    setIntegrationsLoadFailed( false );
+    api.get<IntegrationsData>( 'integrations/get' )
+      .then( setIntegrations )
+      .catch( () => setIntegrationsLoadFailed( true ) )
+      .finally( () => setLoadingIntegrations( false ) );
+  }, [] );
+
+  useEffect( () => { loadIntegrations(); }, [ loadIntegrations ] );
+
+  const handleDisconnect = async () => {
+    if ( ! window.confirm( 'Disconnect your Google account? Your license key will stay active, but dashboard data will stop updating until you reconnect.' ) ) return;
+    setDisconnecting( true );
+    try {
+      await api.post( 'integrations/disconnect', {} );
+      // Refresh integrations
+      const fresh = await api.get<IntegrationsData>( 'integrations/get' ).catch( () => null );
+      setIntegrations( fresh );
+    } catch {
+      // silently fail — user can retry
+    } finally {
+      setDisconnecting( false );
+    }
+  };
+
+  const tierLabel = ( license.tier ?? 'free' ).charAt( 0 ).toUpperCase() + ( license.tier ?? 'free' ).slice( 1 );
+
+  return (
+    <div style={ { display: 'flex', flexDirection: 'column', gap: 16 } }>
+
+      {/* Card 1: Account Status */}
+      <div>
+        <div style={ { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } }>
+          <StatusBadge label={ `${ tierLabel } plan` } variant="active" />
+        </div>
+        { integrations?.google?.email && (
+          <p style={ { margin: '0 0 4px', fontSize: 13, color: colors.textSecondary } }>
+            Connected as <strong>{ integrations.google.email }</strong>
+            { integrations.google.connected_at && (
+              <span style={ { color: colors.textMuted } }> — since { new Date( integrations.google.connected_at ).toLocaleDateString() }</span>
+            ) }
+          </p>
+        ) }
+        { registerMessage && (
+          <p style={ { margin: '4px 0 0', fontSize: 13, color: colors.success } }>{ registerMessage }</p>
+        ) }
+      </div>
+
+      {/* Card 2: Connected Services */}
+      <div style={ {
+        padding: 16, background: '#f8fafc', borderRadius: 8,
+        border: `1px solid ${ colors.border }`,
+      } }>
+        <h3 style={ { margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: colors.textPrimary, fontFamily: font } }>
+          Connected Services
+        </h3>
+        { loadingIntegrations ? (
+          <p style={ { margin: 0, fontSize: 13, color: colors.textMuted } }>Loading…</p>
+        ) : integrationsLoadFailed ? (
+          <div style={ { display: 'flex', alignItems: 'center', gap: 10 } }>
+            <p style={ { margin: 0, fontSize: 13, color: colors.error } }>Could not load service status.</p>
+            <button
+              onClick={ loadIntegrations }
+              style={ {
+                background: 'none', border: 'none', padding: 0,
+                fontSize: 13, fontWeight: 500, color: colors.primary,
+                cursor: 'pointer', fontFamily: font, textDecoration: 'underline',
+              } }
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <div style={ { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } }>
+            { Object.entries( SERVICE_META ).map( ( [ key, meta ] ) => {
+              const svc = integrations?.[ key as keyof IntegrationsData ] as IntegrationService | undefined;
+              return (
+                <div key={ key } style={ {
+                  display: 'flex', alignItems: 'flex-start', gap: 10,
+                  padding: '10px 12px', background: '#fff', borderRadius: 6,
+                  border: `1px solid ${ colors.border }`,
+                } }>
+                  <span style={ { fontSize: 16, lineHeight: 1, marginTop: 1 } }>{ meta.icon }</span>
+                  <div style={ { minWidth: 0, flex: 1 } }>
+                    <div style={ { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 2 } }>
+                      <span style={ { fontSize: 13, fontWeight: 500, color: colors.textPrimary } }>{ meta.label }</span>
+                    </div>
+                    <ServiceStatusBadge service={ svc } />
+                    { svc?.property_name && (
+                      <p style={ { margin: '4px 0 0', fontSize: 11, color: colors.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }>
+                        { svc.property_name }
+                      </p>
+                    ) }
+                    { svc?.account_name && ! svc.property_name && (
+                      <p style={ { margin: '4px 0 0', fontSize: 11, color: colors.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }>
+                        { svc.account_name }
+                      </p>
+                    ) }
+                    { svc?.last_synced_at && (
+                      <p style={ { margin: '2px 0 0', fontSize: 11, color: colors.textMuted } }>
+                        Synced { formatRelativeTime( svc.last_synced_at ) }
+                      </p>
+                    ) }
+                    { svc?.error_message && (
+                      <p style={ { margin: '4px 0 0', fontSize: 11, color: colors.error } }>
+                        { svc.error_message }
+                      </p>
+                    ) }
+                  </div>
+                </div>
+              );
+            } ) }
+          </div>
+        ) }
+      </div>
+
+      {/* Card 3: Dashboard Status */}
+      <div style={ {
+        padding: 16, background: '#f8fafc', borderRadius: 8,
+        border: `1px solid ${ colors.border }`,
+      } }>
+        <h3 style={ { margin: '0 0 10px', fontSize: 14, fontWeight: 600, color: colors.textPrimary, fontFamily: font } }>
+          Dashboard
+        </h3>
+        <DashboardStatusCard status={ license.dashboardStatus } detail={ license.dashboardStatusDetail } />
+      </div>
+
+      {/* Card 4: Account Actions */}
+      <div style={ {
+        padding: 16, background: '#f8fafc', borderRadius: 8,
+        border: `1px solid ${ colors.border }`,
+      } }>
+        <h3 style={ { margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: colors.textPrimary, fontFamily: font } }>
+          Account Actions
+        </h3>
+        <div style={ { display: 'flex', flexWrap: 'wrap', gap: 10 } }>
+          { integrations?.google?.email ? (
+            <SecondaryButton onClick={ handleDisconnect } disabled={ disconnecting }>
+              { disconnecting ? 'Disconnecting…' : 'Disconnect Google Account' }
+            </SecondaryButton>
+          ) : (
+            <button
+              onClick={ onReconnect }
+              disabled={ reconnecting }
+              style={ {
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '10px 20px', background: '#fff', border: `1px solid ${ colors.border }`,
+                borderRadius: 6, fontSize: 14, fontWeight: 500, fontFamily: font,
+                color: colors.textPrimary, cursor: reconnecting ? 'not-allowed' : 'pointer',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+              } }
+            >
+              <GoogleGIcon />
+              { reconnecting ? 'Connecting…' : 'Reconnect Google Account' }
+            </button>
+          ) }
+          <SecondaryButton onClick={ onRerunWizard }>
+            Re-run Setup Wizard
+          </SecondaryButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 interface SettingsPageProps {
@@ -235,12 +483,14 @@ export function SettingsPage( { onNavigateToDashboard, isActive }: SettingsPageP
     const pluginToken = params.get( 'plugin_license_token' );
 
     if ( pluginToken ) {
-      // Remove the token from the URL so it isn't re-processed on refresh.
+      // Remove the token from the URL *immediately* — before the async call —
+      // so a page refresh during processing can't re-trigger registration.
       params.delete( 'plugin_license_token' );
       const cleaned = params.toString();
       const newUrl = window.location.pathname + ( cleaned ? `?${ cleaned }` : '' ) + window.location.hash;
       window.history.replaceState( {}, '', newUrl );
 
+      // Token is now only in the local variable, safe to process asynchronously.
       void api.post<{ license_key?: string; license?: LicenseData; error?: string }>( 'license/register', { token: pluginToken } )
         .then( result => {
           if ( result.license_key ) {
@@ -311,7 +561,7 @@ export function SettingsPage( { onNavigateToDashboard, isActive }: SettingsPageP
     setRegistering( true );
     setRegisterMessage( '' );
     try {
-      const { authUrl } = await api.get<{ authUrl: string }>( 'license/sso?src=default' );
+      const { authUrl } = await api.post<{ authUrl: string }>( 'license/sso', { src: 'default' } );
       const popup = window.open( authUrl, 'roi_oauth', 'width=600,height=700,scrollbars=yes' );
       if ( ! popup ) {
         setRegisterMessage( 'Popup blocked — please allow popups for this page and try again.' );
@@ -377,6 +627,7 @@ export function SettingsPage( { onNavigateToDashboard, isActive }: SettingsPageP
       case 'api_error': return 'We couldn\'t reach the license server to validate your account. Your tracking pixels are still active.';
       case 'invalid_signature': return 'Your license could not be verified. Please try signing in again.';
       case 'expired': return 'Your license has expired. Sign in again to renew.';
+      case 'sodium_unavailable': return 'Your server is missing the PHP sodium extension, which is required for license verification. Please contact your hosting provider to enable it.';
       default: return 'Your license could not be validated.';
     }
   };
@@ -409,22 +660,14 @@ export function SettingsPage( { onNavigateToDashboard, isActive }: SettingsPageP
         </h2>
 
         { license?.isValid ? (
-          /* ── Activated state ── */
-          <div>
-            <div style={ { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 } }>
-              <StatusBadge label={ `Active — ${ license.tier ?? 'free' } tier` } variant="active" />
-            </div>
-
-            <p style={ { margin: '0 0 6px', fontSize: 13, color: colors.textSecondary, lineHeight: 1.6 } }>
-              Your account is connected. Google Ads, GA4, and Search Console data will appear in your Marketing ROI dashboard automatically.
-            </p>
-
-            { registerMessage && (
-              <p style={ { margin: '8px 0 0', fontSize: 13, color: colors.success } }>
-                { registerMessage }
-              </p>
-            ) }
-          </div>
+          /* ── Activated state — 4 cards ── */
+          <ActivatedState
+            license={ license }
+            registerMessage={ registerMessage }
+            onReconnect={ () => void handleSignInWithGoogle() }
+            onRerunWizard={ () => setShowOnboarding( true ) }
+            reconnecting={ registering }
+          />
         ) : hasKeyButNotValid ? (
           /* ── Key exists but validation failed — retry state ── */
           <div>
