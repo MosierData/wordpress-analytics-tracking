@@ -88,7 +88,7 @@ No. GTM injection is just one of many features. You can use ROI Insights purely 
 
 = Will this slow down my site? =
 
-No. All tracking scripts load asynchronously and do not block page rendering. The attribution tracker (md-roi.js) is under 15KB and loads in the footer.
+Remote tracking scripts (GTM, GA4, ad pixels) are loaded asynchronously so they don't block page rendering. Small inline bootstrap snippets run on the main thread but execute in microseconds. The attribution tracker (md-roi.js) is under 15KB and loads in the footer.
 
 = Can I use this if I already have Google Analytics installed? =
 
