@@ -33,8 +33,7 @@ ROI Insights is a free WordPress plugin that replaces the need for separate plug
 * **Event adapters** — auto-fires tracking events for form submissions, phone link clicks, direction requests, thank-you pages, Elementor forms, and Elementor popups
 * **Header and footer script injection** — add any third-party script (Hotjar, Clarity, CallRail, etc.) without editing your theme
 * **Dynamic Number Insertion (DNI)** — swap your phone number with a tracking number on every page so you know which ad made the phone ring
-* **Basic call log** — every call logged with source, caller ID, and duration
-* **Marketing ROI Dashboard** — embedded analytics dashboard showing GA4 traffic, Search Console data, and call activity inside WordPress
+* **Marketing ROI Dashboard** — embedded analytics dashboard showing GA4 traffic, Search Console data, call log, and call activity inside WordPress
 
 = Premium upgrades (optional) =
 
@@ -125,7 +124,7 @@ The plugin communicates with api.roiknowledge.com for license validation and Goo
 
 == External Services ==
 
-This plugin connects to the following external services. No external requests are made until you explicitly activate a license, connect Google, or enable a tracking pixel.
+This plugin connects to the following external services. The local attribution tracker (md-roi.js) loads on all frontend pages to capture UTM parameters and click IDs — it does not contact any external server. External requests to third-party services are only made when you explicitly activate a license, connect Google, or enable a tracking pixel.
 
 **ROI Insights Backend — api.roiknowledge.com**
 
@@ -172,8 +171,7 @@ The attribution tracking script (assets/js/md-roi.js) is bundled with the plugin
 * Built-in event adapters (forms, phone links, directions, thank-you pages, Elementor)
 * Header and footer custom script injection
 * Dynamic Number Insertion (DNI) for call tracking
-* Basic call log with source, caller ID, and duration
-* Embedded Marketing ROI dashboard
+* Embedded Marketing ROI dashboard with call log, GA4 traffic, and Search Console data
 * Free license activation via Google Sign-In or email magic link
 
 == Upgrade Notice ==
