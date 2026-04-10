@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "build": "wp-scripts build src/admin/index.tsx --output-path=build",
-    "start": "wp-scripts start src/admin/index.tsx --output-path=build"
+    "start": "wp-scripts start src/admin/index.tsx --output-path=build",
+    "plugin-zip": "npm run build && rm -rf dist && mkdir -p dist/roi-insights && cp -r roi-insights.php readme.txt LICENSE includes build assets dist/roi-insights/ && cd dist && zip -r ../roi-insights.zip roi-insights && cd .. && rm -rf dist && echo '✓ roi-insights.zip ready for upload'"
   },
   "devDependencies": {
     "@wordpress/scripts": "^30.0.0",
