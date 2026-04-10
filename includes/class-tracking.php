@@ -88,7 +88,7 @@ class ROI_Insights_Tracking {
 		if ( $s['ga4Enabled'] && ! empty( $s['ga4Id'] ) ) {
 			$ga4_id = esc_js( $s['ga4Id'] );
 			echo "<!-- ROI Insights: Google Analytics 4 -->\n";
-			wp_enqueue_script( 'roi-insights-ga4-gtag', 'https://www.googletagmanager.com/gtag/js?id=' . rawurlencode( $s['ga4Id'] ), array(), null, false ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
+			wp_enqueue_script( 'roi-insights-ga4-gtag', 'https://www.googletagmanager.com/gtag/js?id=' . rawurlencode( $s['ga4Id'] ), array(), null, array( 'in_footer' => false, 'strategy' => 'async' ) ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
 			echo "<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','" . $ga4_id . "');</script>\n"; // phpcs:ignore WordPress.Security.EscapeOutput
 		}
 
